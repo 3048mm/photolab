@@ -69,6 +69,7 @@ architecture.md §7 の判断をすべて引き継ぐ。本計画で追加する
 | 常駐プロセスによる自動起動 | **やらない**（Phase 1.5 へ切り出し） | Q4 合意。Phase 1 は手動起動 + 起動時の自動媒体検出まで |
 | `pyexiv2` を製品コードで使う | **やらない** | GPL-3.0（下層の exiv2 も GPL-2.0）。Q8 のライセンス方針に反する。開発時の答え合わせ用途に限り使う |
 | 取り込み履歴を複数レコードで持つ | **やらない**。1 dedup_key : 1 レコードで `dest_path` を更新する | Q3 合意。カタログが答えるのは「取り込み済みか」の1問だけ（architecture.md §3.3） |
+| 独立した `doc/importer_spec.md` を作る | **やらない**（当面）。**architecture.md §5 を育てる** | source of truth を増やさない。§5 が既に仕様の置き場所であり、新設すると計画書 §3 と合わせて記述が3箇所に分散する。§5 が肥大して「全体を掴む」役割を壊し始めたら、そのとき分離して §5 からリンクする |
 
 ## 3. 変更内容
 
@@ -318,8 +319,12 @@ TDD（red-green-refactor）。Step 1 の結果次第で Step 3-4 の設計が変
 
 ### Step 2. `core/naming.py`
 
-- [ ] `tests/core/test_naming.py`: 単一ファイル / 同秒複数 / RAW+JPEG ペア / 既存ファイルとの衝突回避
-- [ ] 実装
+- [x] `tests/core/test_naming.py`: 単一ファイル / 同秒複数 / 採番順序 / 既存ファイルとの衝突回避 /
+      旧形式を消費しないこと / 99 超えでエラー（**12 テスト green**）
+- [x] 実装（`format_basename` / `assign_basenames` / `used_sequences` / `SequenceOverflowError`）
+
+**Step 2 完了。** RAW+JPEG ペアは `Shot`（1カット）として表現したため naming 側では
+自明になり、ペアのグルーピングは `scanner.py`（Step 5）の責務に移した（§7）。
 
 ### Step 3. `core/metadata.py` + `core/dedup.py`
 
@@ -354,6 +359,9 @@ TDD（red-green-refactor）。Step 1 の結果次第で Step 3-4 の設計が変
 
 - [ ] `python -m photolab import --source <dir> --dest <dir> [--dry-run]` を実装
 - [ ] `tmp/dummy_card/` に対して実行し、動作確認する
+- [ ] **確定した仕様を architecture.md §5 に反映する**（本計画書 §3 / §7 から引き上げる）
+      ここが仕様の確定点。GUI（Step 10）はこの §5 を参照して実装する。
+      計画書は完了後 `doc/completed/` へ移る「作業の記録」であり、仕様の置き場所ではない
 
 ### Step 9. `core/thumbnail.py`
 
@@ -383,12 +391,19 @@ GUI は差し替え不要で、実際の GPL 懸念は `pyexiv2` の側にあっ
 - [ ] 実機カードでの受け入れテスト（出力先は `tmp/` — §6 参照）
 - [ ] `architecture.md` の更新（スキーマ確定、§11 未決事項の解消、§7 に本計画の判断を転記、
       §8 の技術スタック表を Q8 の結論で更新、更新履歴）
+      ※ §5（Importer の仕様）は Step 8 時点で反映済みのはず。ここでは差分のみ
 - [ ] `CLAUDE.md` の「現在の状態」「Commands」を更新
 - [ ] 本計画書に検証結果を記入し `doc/completed/` へ移動
 
 ### 作業中メモ
 
-**Step 0 / Step 1 完了（2026-08-09）。次は Step 2 `core/naming.py` の TDD から。**
+**Step 0 / 1 / 2 完了（2026-08-09）。次は Step 3 `core/metadata.py` + `core/dedup.py`。**
+
+- Step 3 では `tmp/probe_tiff.py` / `tmp/probe_mov.py` を `core/metadata.py` に移植する。
+  `Shot.captured_at` / `shutter_count` の供給元になる
+- テスト実行: `$env:PYTHONIOENCODING="utf-8"; $env:PYTHONUTF8="1"; .\venv\Scripts\python.exe -m pytest tests -q`
+
+- **仕様書の扱い**: 独立ファイルは作らず、Step 8 で architecture.md §5 に確定仕様を反映する（§2.2）
 
 - 環境は `.\venv\Scripts\python.exe`（Python 3.12.10）。素の `python` を使わない
 - Step 1 のスパイク成果は `tmp/probe_tiff.py` / `tmp/probe_mov.py` にある。
@@ -514,6 +529,21 @@ DSC_0114.MOV  mvhd.version=0  created=2019-01-02 15:38:47  duration=13.96s
 
 なお、このファイルは `20190101 徳島` フォルダにありながら撮影日は 01-02 だった。
 architecture.md §7「日付でフォルダ自動分割はしない」の裏付けになっている。
+
+### 2026-08-09 / `Shot`（1カット）を naming.py に定義した（当初計画からの変更）
+
+§2.1 のファイル構成には無かったドメインモデル `Shot`
+（`captured_at` / `shutter_count` / `source_name`）が必要になった。
+
+**判断**: 新規ファイル（`core/models.py`）は作らず、**当面 `naming.py` に置く**。
+現時点の利用者が naming だけであり、器を先に作らない方針（TDD）に従う。
+Step 5 の `scanner.py` が同じモデルを必要とした時点で、共通の置き場所へ移す。
+
+**波及**: RAW + JPEG ペアは「1 つの `Shot` が複数ファイルを持つ」形で表現されるため、
+naming.py 側では**同じ basename を返すことが構造的に自明**になった。
+ペアのグルーピング（`DSC_0001.NEF` と `DSC_0001.JPG` を1カットにまとめる）は
+`scanner.py`（Step 5）の責務に移した。Step 2 のテスト項目から「RAW+JPEG ペア」を外し、
+Step 5 側でテストする。
 
 ### 2026-08-09 / pyexiv2 との答え合わせ完了
 
