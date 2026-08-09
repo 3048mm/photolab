@@ -1,0 +1,11 @@
+-r requirements.txt
+
+pytest
+
+# --- 以下は開発時のみ。配布物・製品コードに含めてはならない ---
+#
+# pyexiv2 は GPL-3.0（下層の exiv2 も GPL-2.0）。
+# core/metadata.py の自前パーサが正しい値を返しているかの
+# 「答え合わせ」にのみ使う（計画書 §4-Q8 / §7）。
+# photolab/ 配下から import しないこと。
+pyexiv2

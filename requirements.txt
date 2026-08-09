@@ -1,0 +1,12 @@
+# 製品コードの依存。GPL ライセンスのパッケージは入れない（計画書 §4-Q8）。
+#
+#   PySide6 : LGPLv3 — 動的リンクのまま使う。PyQt5/6 は GPL なので採用しない
+#   rawpy   : MIT（同梱 LibRaw は LGPL-2.1 / CDDL のデュアル）
+#   xxhash  : BSD-2-Clause
+#
+# EXIF / MakerNote の抽出は photolab/core/metadata.py の自前実装で行う。
+# pyexiv2（GPL-3.0）は requirements-dev.txt 側に隔離している。
+
+PySide6
+rawpy
+xxhash

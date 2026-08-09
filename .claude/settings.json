@@ -1,0 +1,23 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -File \"$CLAUDE_PROJECT_DIR/tools/hooks/photo_guard.ps1\"",
+            "timeout": 15,
+            "statusMessage": "photo guard"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "deny": [
+      "Write(D:\\写真\\**)",
+      "Edit(D:\\写真\\**)"
+    ]
+  }
+}

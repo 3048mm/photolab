@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 仮想環境
+venv/
+
+# 作業用（調査スクリプト・使い捨てファイル）
+tmp/
+
+# テストフィクスチャ（D:\写真 から複製した実データ。NEF 1枚 ≈ 25MB のため管理外）
+data/test/
+
+# カタログ・設定（実体は %LOCALAPPDATA%\Photolab\ だが誤配置の保険）
+*.db
+*.db-journal
+config.toml
+
+# Claude Code の個人設定（settings.json は共有するので除外しない）
+.claude/settings.local.json
+
+# OS
+Thumbs.db
+desktop.ini

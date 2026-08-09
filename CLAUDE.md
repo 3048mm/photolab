@@ -1,0 +1,131 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 言語設定
+
+- 常に日本語で会話する
+- コメントも日本語で記述する
+- エラーメッセージの説明も日本語で行う
+- ドキュメントも日本語で生成する
+
+## ⚠️ 写真原本の保護（最優先・厳守）
+
+`D:\写真` は約820GB・NEF 18,909枚の**撮り直しのできない原本**である。
+
+- **書き込み・削除・移動・リネームを一切禁止する**
+- **読み取りは許可**（ファイル構成の確認、EXIF 参照、仕様調査のサンプル読み出し）
+- 書き込みが必要になったら、実行せずにユーザーへ確認する
+- 検証は必ずダミーデータ（`tmp/` 配下）に対して行う。
+  **本番の写真ディレクトリを出力先にしたテストを書いてはならない**
+
+PreToolUse フック `tools/hooks/photo_guard.ps1` が違反を自動ブロックするが、
+これは多層防御の2層目にすぎない。1層目は本ルールの遵守である。
+詳細と許可/ブロックの具体例: `doc/agent_execution_rules.md` §1
+
+> フック設定はセッション開始時に読み込まれる。`.claude/settings.json` や
+> フック本体を変更した場合、**Claude Code を再起動するまで反映されない**。
+
+## エージェント実行規律
+
+`doc/agent_execution_rules.md` が共通ルールの source of truth。特に頻出するもの:
+
+- **同じエラーで3回失敗したら打ち切る**（§5）。同じ呼び出しをそのまま再送しない
+- **日本語を含む `.ps1` は UTF-8 BOM 付きで保存する**（§2）。Windows PowerShell 5.1 は
+  BOM なしを CP932 として読むため、パス比較が静かに失敗する。
+  **Edit / Write ツールで編集すると BOM が落ちるので毎回付け直すこと**。
+  `photo_guard.ps1` を編集したら回帰テストを実行する:
+  `powershell -NoProfile -File tools\hooks\test_photo_guard.ps1`
+- `.py` / `.md` / `.toml` / `.json` は UTF-8 **BOM なし**・LF
+- Python 実行時は `$env:PYTHONIOENCODING="utf-8"; $env:PYTHONUTF8="1"` を付ける（§3）
+- `python -c` は3行以下の単純なコードのみ。それ以上は `tmp/` に `.py` を作る（§4）
+- `sleep` によるポーリング待機は禁止。長時間コマンドは `run_in_background`
+- 一時スクリプト・調査スクリプトは必ず `tmp/` に置く
+
+## 開発ワークフロー
+
+新機能の実装は**計画書ベース**で進める（`doc/agent_execution_rules.md` §8）。
+
+1. `doc/in_progress/_TEMPLATE.md` をコピーして `doc/in_progress/<機能名>_plan.md` を作成
+2. **着手前に §4「ユーザー確認事項」を中心にユーザーとレビューし、合意を得る**
+3. 作業中はチェックリスト・作業中メモ・課題を随時更新（引き継ぎ書として書く）
+4. 完了後 `doc/completed/` へ移動
+
+TDD（red-green-refactor）を基本とする。テストを1つ書いて落とし、通す最小の実装をして、
+リファクタする。「全部テストを書いてから全部実装」ではない。
+
+**設計判断は `doc/architecture.md` に反映する。** 特に「やらないと決めたこと」は
+§7 の表に追記し、別セッションでの再提案を防ぐ。
+
+Git はユーザーがコミットする。エージェントは `git add <明示パス>` まで。
+`git add -A` / `git add .` は禁止。worktree とサブエージェント委譲は使わない。
+
+## Project overview
+
+カメラの RAW 現像ワークフローを支える自作ツール群。Lightroom のコスト削減のため、
+**現像本体は darktable（既製品）に任せ、その前後の欠けている工程を自作する**。
+
+```
+SDカード → [Importer] → D:\写真\<機種>\<YYYYMMDD 撮影名>\
+                              ↓
+                        [darktable]  ← 既製品。Photolab は内部状態に触らない
+                              ↓
+                     <撮影フォルダ>\darktable\*.jpg
+                              ↓
+                        [Exporter] → NAS (Synology) / OneDrive の <撮影フォルダ名>\
+```
+
+**着手前に `doc/architecture.md` を読むこと。** 設計上の source of truth であり、
+実装より優先される。特に以下は複数ファイルを読んでも分からない前提知識:
+
+- **darktable は交換可能な部品として扱う**（§3.1）。`library.db` は読みも書きもしない。
+  現像パラメータの持ち主は darktable ひとつに限る
+- **カタログは資産管理台帳ではない**（§3.3）。答えるのは「このカットは取り込み済みか？」
+  の1問だけ。レーティングや現像状態は持たない
+- **重複判定キーは Nikon MakerNote のシリアル番号 + ショットカウント**（§5.3）。
+  リネームやコピーで壊れない。これがプロジェクトの技術的な肝
+- **原画は機種別階層、配布先はフラットでマージ**（§4）。`Z6\` `Z50\` は所有者の区別も兼ねる
+- **やらないと決めたこと一覧**（§7）
+
+## 現在の状態
+
+**2026-08-07 時点: 構想フェーズ完了、Phase 1（Importer）未着手。**
+コードはまだ存在しない。git も未初期化。
+
+存在するもの:
+
+```
+doc/architecture.md            設計 source of truth
+doc/agent_execution_rules.md   エージェント共通ルール
+doc/in_progress/_TEMPLATE.md   計画書テンプレート
+tools/hooks/photo_guard.ps1      写真原本保護フック（UTF-8 BOM 付き）
+tools/hooks/test_photo_guard.ps1 上記の回帰テスト（18ケース）
+.claude/settings.json            フック登録
+```
+
+## Commands
+
+**未整備。** venv・`requirements.txt`・`pytest.ini` は Phase 1 着手時に作成する。
+予定しているスタック（`doc/architecture.md` §8）:
+
+| 用途 | 選定 |
+| :--- | :--- |
+| 言語 | Python 3.12 (`C:\Users\crazy\AppData\Local\Programs\Python\Python312\python.exe`) |
+| GUI | PySide6 (Qt) — 将来の Linux 移管を考慮 |
+| サムネイル抽出 | `rawpy`（NEF 埋め込み JPEG をデコードせず取得） |
+| EXIF / MakerNote | `pyexiv2`（フォールバック `exiftool`）— Phase 1 冒頭で取得可否を検証する |
+| ハッシュ | `xxhash` |
+| カタログ | 標準 `sqlite3` → `%LOCALAPPDATA%\Photolab\catalog.db` |
+| テスト | `pytest` |
+
+Python 実行は venv 作成後は `.\venv\Scripts\python.exe` を使う（素の `python` を使わない）。
+
+## Coding conventions
+
+- **import 形式は1つに統一する**: `from photolab.core import ...`。
+  stocktool では複数の import 形式が混在して常時の混乱要因になったため、
+  本プロジェクトでは最初から1形式に固定する
+- **テストは `tests/` にソースと 1:1 ミラー**し `test_` を前置する
+  （`photolab/core/naming.py` → `tests/core/test_naming.py`）
+- GUI 非依存のロジックは `photolab/core/` に置き、PySide6 を import しない。
+  テスト可能性のため、UI 層とドメインロジックを混ぜない

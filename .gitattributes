@@ -1,0 +1,7 @@
+# 改行は LF に統一する（agent_execution_rules.md §2）。
+# git の autocrlf で CRLF に変換されると、規約と実ファイルが食い違うため。
+* text=auto eol=lf
+
+# UTF-8 BOM 付きを維持する必要があるフック本体。
+# BOM はファイル内容なので text 扱いでも保持されるが、意図を明示しておく。
+tools/hooks/*.ps1 text eol=lf
