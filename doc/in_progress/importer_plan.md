@@ -328,21 +328,43 @@ TDD（red-green-refactor）。Step 1 の結果次第で Step 3-4 の設計が変
 
 ### Step 3. `core/metadata.py` + `core/dedup.py`
 
-- [ ] `tests/core/test_metadata.py`: 実フィクスチャからの抽出、破損ファイル・未対応形式の扱い
-- [ ] `tests/core/test_dedup.py`: 静止画キー / 動画キー / 退避キーの生成
-- [ ] 実装（バックエンド差し替え可能な形）
+- [x] `tests/core/test_metadata.py`: NEF / JPG / MOV の抽出、RAW+JPEG ペアの一致、
+      破損・空・未対応・存在しないファイルの扱い
+- [x] `tests/core/test_dedup.py`: 静止画キー / 退避キー / `build_key` の分岐
+- [x] 実装（`core/metadata.py` は標準ライブラリのみ。`core/dedup.py` は `DedupKey` を返す）
+
+**Step 3 完了（33 テスト green）。** スパイクからの移植で追加した設計:
+
+- `read_metadata()` は**例外を投げず**、取れなかった項目を None にした `Metadata` を返す。
+  1枚の異常で取り込みバッチ全体を落とさないため
+- `build_key()` は `DedupKey(value, is_fallback)` を返す。
+  `is_fallback` が GUI の警告表示（Q1）の根拠になる
+- 抽出バックエンドの差し替え機構（`exiftool` フォールバック）は**作らなかった**。
+  自前パーサが 200/200 で成立し、`exiftool` も未インストールのため YAGNI。
+  必要になったら `read_still_metadata` を差し替える
 
 ### Step 4. `core/catalog.py`
 
-- [ ] `tests/core/test_catalog.py`: スキーマ作成、バッチ記録、dedup_key の UNIQUE 衝突、既取り込み問い合わせ
-- [ ] 実装（テストはインメモリ / tmp の sqlite に対して行う）
-- [ ] **確定したスキーマを architecture.md §9 に反映する**
+- [x] `tests/core/test_catalog.py`: スキーマ作成・再オープン、バッチの開始/完了/中断、
+      取り込み済み判定、一括問い合わせ、UPSERT、退避キーの記録、メタデータの保存
+- [x] 実装（テストは pytest の `tmp_path` 配下の sqlite に対して行う）
+- [x] **確定したスキーマを architecture.md §9 に反映する**
+
+**Step 4 完了（51 テスト green）。** 草案からの変更:
+
+- `imported_media.is_fallback` を追加。弱いキー（`t:` / `n:`）で登録されたことを記録し、
+  GUI の警告表示と後からの棚卸しに使う
+- `schema_version` テーブルを追加（Phase 2 でのスキーマ拡張に備える。`SCHEMA_VERSION = 1`）
+- 再取り込みは `ON CONFLICT(dedup_key) DO UPDATE` の UPSERT で実装（Q3 合意）
 
 ### Step 5. `core/scanner.py`
 
-- [ ] `tests/core/test_scanner.py`: 除外ファイル判定（`NC_FLLST.DAT` / `.THM` / `.LRV`）、
-      RAW+JPEG のカット単位グルーピング、`DCIM/` 検出
-- [ ] 実装（媒体検出はモック可能なインターフェースに分離）
+- [x] `tests/core/test_scanner.py`: 除外ファイル判定、DCIM 配下限定の走査、
+      RAW+JPEG のカット単位グルーピング、JPEG 単独、`DCIM/` 検出、`MediaCandidate`
+- [x] 実装（Windows 依存は `find_media()` / `_volume_label()` / `_is_removable()` に閉じ込めた）
+- [x] **実機カード（L:）で通し確認**（§7）
+
+**Step 5 完了（71 テスト green）。**
 
 ### Step 6. `core/copier.py`
 
@@ -362,6 +384,8 @@ TDD（red-green-refactor）。Step 1 の結果次第で Step 3-4 の設計が変
 - [ ] **確定した仕様を architecture.md §5 に反映する**（本計画書 §3 / §7 から引き上げる）
       ここが仕様の確定点。GUI（Step 10）はこの §5 を参照して実装する。
       計画書は完了後 `doc/completed/` へ移る「作業の記録」であり、仕様の置き場所ではない
+      → **2026-08-09 に一部を前倒しで反映済み**（§5.2 命名 / §5.3 メタデータ / §5.4 サムネイル /
+      §7 / §8 / §10 / §11）。Step 8 では残り（scanner・copier・importer の確定仕様）を反映する
 
 ### Step 9. `core/thumbnail.py`
 
@@ -397,11 +421,13 @@ GUI は差し替え不要で、実際の GPL 懸念は `pyexiv2` の側にあっ
 
 ### 作業中メモ
 
-**Step 0 / 1 / 2 完了（2026-08-09）。次は Step 3 `core/metadata.py` + `core/dedup.py`。**
+**Step 0 〜 5 完了（2026-08-09）。次は Step 6 `core/copier.py`（xxh3 照合）。**
 
-- Step 3 では `tmp/probe_tiff.py` / `tmp/probe_mov.py` を `core/metadata.py` に移植する。
-  `Shot.captured_at` / `shutter_count` の供給元になる
 - テスト実行: `$env:PYTHONIOENCODING="utf-8"; $env:PYTHONUTF8="1"; .\venv\Scripts\python.exe -m pytest tests -q`
+- 現在 **71 テスト green**。`data/test/` が無い環境では実データ系が skip される
+- `tmp/probe_*.py` はスパイクと実機確認の記録（`probe_card.py` は媒体を挿して再実行できる）
+- カタログスキーマは確定済み。architecture.md §9 が最新
+- `Shot` は `core/models.py` にある（Step 5 で naming.py から移動）
 
 - **仕様書の扱い**: 独立ファイルは作らず、Step 8 で architecture.md §5 に確定仕様を反映する（§2.2）
 
@@ -544,6 +570,73 @@ naming.py 側では**同じ basename を返すことが構造的に自明**に�
 ペアのグルーピング（`DSC_0001.NEF` と `DSC_0001.JPG` を1カットにまとめる）は
 `scanner.py`（Step 5）の責務に移した。Step 2 のテスト項目から「RAW+JPEG ペア」を外し、
 Step 5 側でテストする。
+
+### 2026-08-09 / 撮影日時が取れないファイルの扱い（**決定済み・実装済み**）
+
+`build_key()` の実装中に判明した仕様の穴。**命名（§3.2）も重複判定キー（§3.1）も
+`captured_at` に依存している**ため、EXIF に日時が無いファイルは名前もキーも作れない。
+
+当初はファイル更新日時（mtime）で補う案を出したが、ユーザーレビューで方針が変わった。
+
+> **REV** どちらかというと対応してないフォーマットが出てきた時かねぇ。
+> 一旦 exif に無い場合は警告出しつつオリジナルファイル名でいいのでは。
+
+**決定**: 想定ケースは「Nikon 以外の未対応フォーマットが混ざった時」であり、
+撮影日時をでっち上げる必要はない。
+
+- **リネームしない。元ファイル名のまま取り込む**（`assign_basenames` が
+  `captured_at is None` のカットに元の basename を返す）
+- そのカットは**秒内連番を消費しない**
+- 重複判定キーは名前キー `n:{source_name}:{size}` に落とす（3段階の最弱）
+- `DedupKey.is_fallback = True` になるので **GUI 警告の対象**になる
+
+mtime 案は却下。撮影時刻に見える偽の日時をファイル名に焼き付ける方が害が大きい。
+
+**波及**: `Shot.captured_at` の型を `datetime | None` に変更した。
+`build_key()` の `ValueError` は廃止（3段階目に落ちるため到達しなくなった）。
+
+### 2026-08-09 / 実機カード（Nikon Z6 / L:）での通し確認
+
+ユーザーがカードを挿してくれたので、`scanner` → `naming` を通しで検証した（読み取りのみ）。
+確認スクリプトは `tmp/probe_card.py`。
+
+```
+媒体候補判定 (DCIM の有無): True
+カット数: 355
+  .JPG           2 カット   ← JPEG 単独
+  .JPG+.NEF    352 カット
+  .MOV           1 カット
+撮影日時が取れなかったカット: 0
+ショットカウントが取れなかったカット: 1  ← MOV（想定どおり）
+
+DSC_4586.NEF -> 20260712-151201_01  count=24589
+秒内連番が 02 以上になったもの: 15 カット
+```
+
+ファイル数の内訳（708件 = 352×2 + 2 + 1 + `NC_FLLST.DAT`）と完全に一致した。
+
+**判明した事実**:
+
+- **カードのルートに `NIKON\Z_6` `NIKON001.DSC` `System Volume Information\` がある。**
+  `DCIM/` 配下限定の走査 + 許可リスト方式の両方が必要だと分かった
+- **ボリュームラベルが `NIKON Z 6`。** 機種名が入っている。
+  メディア選択の表示名に使えるほか、**出力先の機種フォルダ（`D:\写真\Z6\`）の
+  提案にも使える**（Step 10 で活用する）
+- **JPEG 単独カットが Z6 のカードにも実在した**（DSC_4657 / DSC_4658）。
+  Z50 だけの話ではない
+- **秒内連番 `_02` が 15 カット発生。** architecture.md §5.2 の前提
+  「秒解像度では必ず衝突する」が実データで裏付けられた
+- 1枚のカードに **10日分**（2026-07-12 〜 08-08）が混在。
+  architecture.md §7「日付でフォルダ自動分割はしない」の裏付け
+
+### 2026-08-09 / `Shot` を `core/models.py` へ移動（当初計画からの変更）
+
+Step 2 で暫定的に `naming.py` に置いた `Shot` を、`scanner.py` と共有するため
+`core/models.py` へ移した（Step 2 の §7 で「Step 5 で判断する」と申し送りした件）。
+
+あわせて `files: tuple[Path, ...]` と `size` を追加した。1カットを構成する
+全ファイル（RAW+JPEG）と、代表ファイル（RAW 優先）のサイズを持つ。
+`size` は退避キー `t:{captured_at}:{source_name}:{size}` が使う。
 
 ### 2026-08-09 / pyexiv2 との答え合わせ完了
 

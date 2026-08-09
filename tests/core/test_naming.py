@@ -101,6 +101,29 @@ class TestExistingCollision:
         assert assign_basenames([shot((12, 2, 35))], existing) == ["20260711-120235_01"]
 
 
+class TestNoCapturedAt:
+    """撮影日時が取れないファイル（未対応フォーマット等）はリネームしない。
+
+    日時が無い以上 `YYYYMMDD-hhmmss_NN` は組み立てられない。
+    でっち上げた日時を付けるより、元ファイル名のまま取り込んで警告する。
+    """
+
+    def test_撮影日時が無ければ元のファイル名を使う(self):
+        s = Shot(captured_at=None, shutter_count=None, source_name="IMG_1234.HEIC")
+        assert assign_basenames([s]) == ["IMG_1234"]
+
+    def test_撮影日時が無いカットは連番を消費しない(self):
+        shots = [
+            Shot(captured_at=None, shutter_count=None, source_name="IMG_1234.HEIC"),
+            shot((12, 2, 35)),
+        ]
+        assert assign_basenames(shots) == ["IMG_1234", "20260711-120235_01"]
+
+    def test_拡張子が無い元ファイル名でも動く(self):
+        s = Shot(captured_at=None, shutter_count=None, source_name="README")
+        assert assign_basenames([s]) == ["README"]
+
+
 class TestSequenceOverflow:
     """連番は2桁固定。99 を超えたら黙って上書きせずエラーで止める（計画書 §3.2）。"""
 

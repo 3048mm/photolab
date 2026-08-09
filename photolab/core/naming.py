@@ -9,9 +9,10 @@
 
 import re
 from collections import defaultdict
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable, Sequence
+
+from photolab.core.models import Shot
 
 # 連番の桁数。秒間 100 コマを撮れるカメラは存在しないため 2 桁で足りる。
 SEQ_DIGITS = 2
@@ -31,19 +32,6 @@ class SequenceOverflowError(Exception):
     秒間 100 コマを撮れるカメラは存在しないため、ここに到達したら
     メタデータの異常か実装のバグである。黙って上書きせず停止する。
     """
-
-
-@dataclass(frozen=True)
-class Shot:
-    """取り込み対象の 1 カット。
-
-    RAW + JPEG のペアは 1 カットとして扱い、同じ basename を共有する
-    （architecture.md §5.2）。
-    """
-
-    captured_at: datetime
-    shutter_count: int | None
-    source_name: str
 
 
 def format_basename(captured_at: datetime, seq: int) -> str:
@@ -87,11 +75,16 @@ def assign_basenames(
     """
     used = used_sequences(existing_names)
 
+    names: list[str | None] = [None] * len(shots)
+
     by_second: dict[datetime, list[int]] = defaultdict(list)
     for index, s in enumerate(shots):
-        by_second[s.captured_at].append(index)
-
-    names: list[str | None] = [None] * len(shots)
+        if s.captured_at is None:
+            # 撮影日時が無ければ日時ベースの名前は組み立てられない。
+            # でっち上げるより元ファイル名のまま取り込み、呼び出し側が警告する。
+            names[index] = s.source_name.rsplit(".", 1)[0]
+        else:
+            by_second[s.captured_at].append(index)
     for captured_at, indexes in by_second.items():
         indexes.sort(key=lambda i: _order_key(shots[i]))
         taken = used[f"{captured_at:%Y%m%d-%H%M%S}"]
