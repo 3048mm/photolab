@@ -90,10 +90,11 @@ class ImportResult:
     batch_id: int
     imported: tuple[PlannedShot, ...]
     failed: tuple[tuple[PlannedShot, Exception], ...]
+    cancelled: bool = False
 
     @property
     def ok(self) -> bool:
-        return not self.failed
+        return not self.failed and not self.cancelled
 
 
 def _existing_names(dest_root: Path) -> list[str]:
@@ -188,6 +189,7 @@ def execute(
     catalog: Catalog,
     selected: Sequence[PlannedShot] | None = None,
     progress: Callable[[int, int, PlannedShot], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> ImportResult:
     """計画を実行する。
 
@@ -196,6 +198,11 @@ def execute(
 
     1カットのコピーに失敗しても**バッチ全体は止めない**。失敗したカットは
     カタログに登録せず `ImportResult.failed` に入れて返す。
+
+    `should_cancel` が True を返したら**カットの区切りで中断**する。
+    コピー途中のファイルを残さないため、1カットの処理中には割り込まない。
+    **コピー済みのファイルは削除しない**（architecture.md §7）。
+    中断したバッチは `aborted` として記録する。
     """
     targets = list(selected) if selected is not None else list(import_plan.new_shots)
 
@@ -206,9 +213,14 @@ def execute(
 
     imported: list[PlannedShot] = []
     failed: list[tuple[PlannedShot, Exception]] = []
+    cancelled = False
 
     try:
         for index, planned_shot in enumerate(targets, start=1):
+            # カットの区切りでだけ中断する。コピー途中には割り込まない
+            if should_cancel is not None and should_cancel():
+                cancelled = True
+                break
             if progress:
                 progress(index, len(targets), planned_shot)
             try:
@@ -222,8 +234,16 @@ def execute(
         catalog.abort_batch(batch_id, file_count=len(imported))
         raise
 
-    catalog.finish_batch(batch_id, file_count=len(imported))
-    return ImportResult(batch_id=batch_id, imported=tuple(imported), failed=tuple(failed))
+    if cancelled:
+        catalog.abort_batch(batch_id, file_count=len(imported))
+    else:
+        catalog.finish_batch(batch_id, file_count=len(imported))
+    return ImportResult(
+        batch_id=batch_id,
+        imported=tuple(imported),
+        failed=tuple(failed),
+        cancelled=cancelled,
+    )
 
 
 def _import_one(planned_shot: PlannedShot, catalog: Catalog, batch_id: int) -> None:

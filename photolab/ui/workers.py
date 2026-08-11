@@ -109,6 +109,15 @@ class ImportWorker(QObject):
         self._plan = import_plan
         self._selected = list(selected)
         self._catalog_path = catalog_path
+        self._cancel = False
+
+    @Slot()
+    def cancel(self) -> None:
+        """中断を要求する。**カットの区切りまで実際には止まらない**。
+
+        コピー途中のファイルを残さないため、1カットの処理には割り込まない。
+        """
+        self._cancel = True
 
     @Slot()
     def run(self) -> None:
@@ -117,7 +126,13 @@ class ImportWorker(QObject):
                 def report(index: int, total: int, planned_shot) -> None:
                     self.progress.emit(index, total, planned_shot.basename)
 
-                result = execute(self._plan, catalog, self._selected, report)
+                result = execute(
+                    self._plan,
+                    catalog,
+                    self._selected,
+                    report,
+                    should_cancel=lambda: self._cancel,
+                )
             self.finished.emit(result)
         except Exception as e:
             self.failed.emit(f"取り込みに失敗しました: {e}")

@@ -77,6 +77,32 @@ darktable のバージョンアップにも、将来の別ソフトへの乗り�
 **内部状態には触らない**ため上の方針に反しない。乗り換え時は起動する
 コマンドを差し替えるだけで済む。実行ファイルのパスは `config.toml` に持つ。
 
+#### 現像対象の絞り込み（2026-08-11）
+
+取り込むファイルと現像するファイルは別である。
+
+| フォルダの中身 | 現像したいもの |
+| :--- | :--- |
+| RAW + JPEG のペア | **RAW のみ** |
+| JPEG のみ | **JPEG** |
+| 動画 | 現像しない（darktable が対象外） |
+
+darktable 側の設定 `ui_last/import_ignore_nonraws` を `--conf` で一時的に渡して実現する
+（`darktablerc` には保存されない）。ただし**この設定はフォルダ単位で JPEG を一律に無視する**。
+「ペアのときだけ JPEG を外す」ことは darktable にはできない
+（[要望は挙がっているが未実装](https://darktable-devel.narkive.com/hZKNybMG/)）。
+
+そのため Photolab 側で次のように振る舞う。
+
+- **フォルダに RAW があるとき**だけ `ignore_nonraws=TRUE` を渡す
+  （RAW が無いフォルダで渡すと何も読み込まれなくなる）
+- **RAW が対になっていない JPEG は巻き添えで読み込まれない。**
+  該当ファイルを数え上げて利用者に知らせる（`developer.jpeg_only_names()`）
+- `JPEG も現像対象にする` のチェックで無効化できる（`config.toml` の
+  `[darktable] develop_jpeg`）
+
+**JPEG 単独のカットは GUI のサムネイルに `JPG` バッジ**を出して区別できるようにしている。
+
 ### 3.2 写真原本は再取得不可能な資産である
 
 `D:\写真`（約820GB / NEF 18,909枚）はバックアップではなく原本である。
@@ -452,6 +478,20 @@ CREATE TABLE schema_version (
   後からの棚卸しに使う
 - `imported_keys(keys)` で一括問い合わせできる。GUI のサムネイルグリッドが
   1枚ずつ問い合わせずに済むようにするため
+
+### 9.1 カタログの点検（`core/maintenance.py`）
+
+カタログと実ファイルは独立に動く。取り込んだ後に手でファイルを消すと
+**カタログだけが「取り込み済み」と言い続け**、そのカットは次回グレーアウトされて
+既定で選択されなくなる（誤って取り込んだ分を消したときに実際に起きた）。
+
+- `check_catalog()` が食い違いを検出する（既定は存在確認のみ。
+  `verify_hash=True` でハッシュも照合するが全ファイルを読むので遅い）
+- `remove_missing()` が実ファイルの無い記録を削除する。
+  **写真そのものには触れない。** 記録が消えたカットは「未取り込み」に戻る
+- 起動時に `abort_stale_batches()` で、強制終了により `running` のまま
+  残ったバッチを `aborted` にする
+- 入り口は CLI の `photolab doctor [--fix]` と GUI の［ツール］→［カタログを点検...］
 
 設定ファイルは `%LOCALAPPDATA%\Photolab\config.toml` に置く
 （Linux 移管時は `~/.local/share/photolab/` / `~/.config/photolab/`）。

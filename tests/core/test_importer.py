@@ -164,6 +164,66 @@ class TestSplitByDate:
 
 
 @pytest.mark.fixtures
+class TestCancel:
+    """取り込みの中断。コピー済みは残し、バッチは aborted で記録する。"""
+
+    def test_中断すると残りを取り込まない(self, card, dest, catalog):
+        import_plan = plan(card, dest, catalog)
+        calls = {"n": 0}
+
+        def should_cancel():
+            calls["n"] += 1
+            return calls["n"] > 2  # 2カット処理したら中断
+
+        result = execute(import_plan, catalog, should_cancel=should_cancel)
+
+        assert result.cancelled is True
+        assert len(result.imported) == 2
+        assert len(result.imported) < len(import_plan.shots)
+
+    def test_中断したバッチはabortedになる(self, card, dest, catalog):
+        result = execute(plan(card, dest, catalog), catalog, should_cancel=lambda: True)
+        assert catalog.batch_status(result.batch_id) == "aborted"
+
+    def test_中断してもコピー済みは消さない(self, card, dest, catalog):
+        import_plan = plan(card, dest, catalog)
+        calls = {"n": 0}
+
+        def should_cancel():
+            calls["n"] += 1
+            return calls["n"] > 1
+
+        execute(import_plan, catalog, should_cancel=should_cancel)
+
+        assert dest.is_dir() and any(dest.iterdir())
+
+    def test_中断したカットは取り込み済みにならない(self, card, dest, catalog):
+        execute(plan(card, dest, catalog), catalog, should_cancel=lambda: True)
+        again = plan(card, dest, catalog)
+        assert len(again.new_shots) == len(again.shots)
+
+    def test_中断しなければ完了扱い(self, card, dest, catalog):
+        result = execute(plan(card, dest, catalog), catalog, should_cancel=lambda: False)
+        assert result.cancelled is False
+        assert catalog.batch_status(result.batch_id) == "done"
+
+
+class TestStaleBatch:
+    """強制終了で running のまま残ったバッチを片付ける。"""
+
+    def test_runningのバッチをabortedにする(self, catalog):
+        batch_id = catalog.start_batch("E:", r"D:\tmp")
+        assert catalog.abort_stale_batches() == 1
+        assert catalog.batch_status(batch_id) == "aborted"
+
+    def test_完了済みは触らない(self, catalog):
+        batch_id = catalog.start_batch("E:", r"D:\tmp")
+        catalog.finish_batch(batch_id, file_count=1)
+        assert catalog.abort_stale_batches() == 0
+        assert catalog.batch_status(batch_id) == "done"
+
+
+@pytest.mark.fixtures
 class TestExecute:
     def test_コピーされる(self, card, dest, catalog):
         execute(plan(card, dest, catalog), catalog)

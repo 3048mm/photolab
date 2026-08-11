@@ -32,8 +32,15 @@ from photolab.core.config import (
     load_config,
     save_config,
 )
-from photolab.core.developer import DeveloperNotFoundError, find_darktable, launch
+from photolab.core.developer import (
+    DeveloperNotFoundError,
+    find_darktable,
+    folder_has_raw,
+    jpeg_only_names,
+    launch,
+)
 from photolab.core.importer import build_plan
+from photolab.core.maintenance import check_catalog, remove_missing
 from photolab.core.naming import strip_date_prefix, suggest_folder_name
 from photolab.core.scanner import MediaCandidate, find_media
 from photolab.ui import theme
@@ -63,10 +70,15 @@ class MainWindow(QMainWindow):
         self._config_path = config_path or default_config_path()
         self._config = load_config(self._config_path)
 
+        # 強制終了で running のまま残ったバッチを片付ける
+        with Catalog(self._catalog_path) as catalog:
+            catalog.abort_stale_batches()
+
         self._media: list[MediaCandidate] = []
         # (スレッド, ワーカー) の組。ワーカーは参照を保持しないと GC される
         self._jobs: list[tuple[QThread, object]] = []
         self._thumbnail_worker: ThumbnailWorker | None = None
+        self._import_worker: ImportWorker | None = None
         self._busy = False
         # 出力先の計画を作り直すべきかの判定に使う（出力先 / 日付分割 / 撮影名）
         self._plan_signature: tuple | None = None
@@ -78,10 +90,64 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("Photolab")
         self.resize(self._config.window_width, self._config.window_height)
+        self._build_menu()
         self._build()
         self.refresh_media()
 
     # --- 組み立て ---------------------------------------------------------
+
+    def _build_menu(self) -> None:
+        tools = self.menuBar().addMenu("ツール")
+        action = tools.addAction("カタログを点検...")
+        action.setToolTip("取り込み済みの記録と実ファイルの食い違いを調べる")
+        action.triggered.connect(self._on_check_catalog)
+
+    def _on_check_catalog(self) -> None:
+        """カタログと実ファイルの食い違いを調べ、必要なら記録を消す。
+
+        **写真そのものは削除しない。** 消えるのはカタログの記録だけ。
+        """
+        with Catalog(self._catalog_path) as catalog:
+            report = check_catalog(catalog)
+
+            if report.ok:
+                QMessageBox.information(
+                    self,
+                    "カタログの点検",
+                    f"登録 {report.total} 件。問題はありません。",
+                )
+                return
+
+            listed = "\n".join(
+                f"  {r['dest_path']}\\{r['dest_name']}" for r in report.missing[:15]
+            )
+            more = (
+                f"\n  ... 他 {len(report.missing) - 15} 件"
+                if len(report.missing) > 15
+                else ""
+            )
+            answer = QMessageBox.question(
+                self,
+                "カタログの点検",
+                f"登録 {report.total} 件のうち、"
+                f"{len(report.missing)} 件は実ファイルがありません。\n"
+                "取り込んだ後に削除された可能性があります。\n\n"
+                f"{listed}{more}\n\n"
+                "これらの記録をカタログから削除しますか？\n"
+                "・写真そのものは削除しません\n"
+                "・該当のカットは次回から『未取り込み』として扱われます",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+            removed = remove_missing(catalog, report)
+
+        QMessageBox.information(
+            self,
+            "カタログの点検",
+            f"{removed} 件の記録を削除しました。\n写真は削除していません。",
+        )
+        self._start_plan()  # グレーアウトの状態を更新する
 
     def _build(self) -> None:
         root = QWidget()
@@ -286,13 +352,29 @@ class MainWindow(QMainWindow):
             )
         button_row.addWidget(self._open_developer)
 
-        self._dry_run_button = QPushButton("ドライラン")
-        self._dry_run_button.clicked.connect(self._on_dry_run)
+        # RAW+JPEG のペアが両方 darktable に入るのを避ける。
+        # darktable 側はフォルダ単位でしか JPEG を無視できないため、
+        # 「ペアのときだけ外す」ことはできない（外すと JPEG 単独も落ちる）
+        self._develop_jpeg = QCheckBox("JPEG も現像対象にする")
+        self._develop_jpeg.setChecked(self._config.develop_jpeg)
+        self._develop_jpeg.setToolTip(
+            "オフ: フォルダに RAW があれば JPEG を darktable に読み込ませません\n"
+            "（RAW が無いフォルダでは、この設定に関わらず JPEG を読み込みます）"
+        )
+        self._develop_jpeg.toggled.connect(self._on_develop_jpeg_toggled)
+        button_row.addWidget(self._develop_jpeg)
+
         self._import_button = QPushButton("取り込み開始")
         self._import_button.setDefault(True)
         self._import_button.clicked.connect(self._on_import)
+
+        # 取り込み中だけ出す。強制終了させないための逃げ道
+        self._cancel_button = QPushButton("中断")
+        self._cancel_button.setVisible(False)
+        self._cancel_button.clicked.connect(self._on_cancel)
+
         button_row.addStretch(1)
-        button_row.addWidget(self._dry_run_button)
+        button_row.addWidget(self._cancel_button)
         button_row.addWidget(self._import_button)
 
         box.addWidget(self._warning)
@@ -533,28 +615,8 @@ class MainWindow(QMainWindow):
         # 対象が無いときに押せてしまうと、押してから断られることになる
         if not self._busy:
             self._import_button.setEnabled(count > 0)
-            self._dry_run_button.setEnabled(count > 0)
 
     # --- 実行 -------------------------------------------------------------
-
-    def _on_dry_run(self) -> None:
-        import_plan = self._model.plan()
-        checked = self._model.checked_shots()
-        if import_plan is None or not checked:
-            QMessageBox.information(self, "ドライラン", "取り込む対象がありません。")
-            return
-        lines = [
-            f"{s.shot.source_name}  ->  " + ", ".join(f.dest.name for f in s.files)
-            for s in checked[:30]
-        ]
-        if len(checked) > 30:
-            lines.append(f"... 他 {len(checked) - 30} カット")
-        QMessageBox.information(
-            self,
-            "ドライラン",
-            f"{len(checked)} カットを次のように取り込みます。\n"
-            f"（ファイルは作成されません）\n\n" + "\n".join(lines),
-        )
 
     def _on_import(self) -> None:
         dest = self._dest_root()
@@ -598,7 +660,20 @@ class MainWindow(QMainWindow):
         worker.progress.connect(self._on_import_progress)
         worker.finished.connect(self._on_import_finished)
         worker.failed.connect(self._on_failed)
+        self._import_worker = worker
+        self._cancel_button.setVisible(True)
+        self._cancel_button.setEnabled(True)
+        self._cancel_button.setText("中断")
         self._run(worker)
+
+    def _on_cancel(self) -> None:
+        if self._import_worker is None:
+            return
+        # ワーカーは別スレッドにいるので、フラグを立てるだけ。
+        # 実際に止まるのは処理中のカットが終わってから
+        self._import_worker.cancel()
+        self._cancel_button.setEnabled(False)
+        self._cancel_button.setText("中断しています...")
 
     def _on_import_progress(self, index: int, total: int, name: str) -> None:
         self._progress.setValue(index)
@@ -606,6 +681,10 @@ class MainWindow(QMainWindow):
 
     def _on_open_developer_toggled(self, checked: bool) -> None:
         self._config.launch_darktable_after_import = checked
+        save_config(self._config, self._config_path)
+
+    def _on_develop_jpeg_toggled(self, checked: bool) -> None:
+        self._config.develop_jpeg = checked
         save_config(self._config, self._config_path)
 
     def _imported_folder(self, result) -> Path | None:
@@ -616,8 +695,27 @@ class MainWindow(QMainWindow):
         return self._dest_root() if dirs else None
 
     def _launch_developer(self, folder: Path) -> None:
+        include_jpeg = self._develop_jpeg.isChecked()
+
+        # JPEG を外す設定のとき、RAW の無い JPEG も巻き添えで読み込まれない。
+        # darktable 側でペアだけを狙って外すことはできないため、ここで知らせる
+        if not include_jpeg and folder_has_raw(folder):
+            orphans = jpeg_only_names(folder)
+            if orphans:
+                listed = "\n".join(f"  {n}" for n in orphans[:10])
+                more = f"\n  ... 他 {len(orphans) - 10} 件" if len(orphans) > 10 else ""
+                QMessageBox.information(
+                    self,
+                    "darktable に読み込まれない JPEG",
+                    f"RAW が対になっていない JPEG が {len(orphans)} 件あります。\n"
+                    "darktable は JPEG をフォルダ単位でしか無視できないため、"
+                    "これらも読み込まれません。\n\n"
+                    f"{listed}{more}\n\n"
+                    "必要なら［JPEG も現像対象にする］を入れて開き直してください。",
+                )
+
         try:
-            launch(folder, self._config.darktable_executable)
+            launch(folder, self._config.darktable_executable, include_jpeg)
         except DeveloperNotFoundError as e:
             QMessageBox.warning(self, "darktable", str(e))
         except OSError as e:
@@ -632,8 +730,15 @@ class MainWindow(QMainWindow):
         self._set_busy(False)
         self._progress.setVisible(False)
         self._progress_label.clear()
+        self._cancel_button.setVisible(False)
+        self._import_worker = None
 
         message = f"{len(result.imported)} カットを取り込みました。"
+        if result.cancelled:
+            message = (
+                f"中断しました。{len(result.imported)} カットまで取り込み済みです。\n"
+                "コピー済みのファイルは残しています。"
+            )
         if result.failed:
             message += f"\n\n{len(result.failed)} カットが失敗しました:\n"
             message += "\n".join(
@@ -644,9 +749,17 @@ class MainWindow(QMainWindow):
         available = find_darktable(self._config.darktable_executable) is not None
 
         box = QMessageBox(self)
-        box.setWindowTitle("取り込み完了（一部失敗）" if result.failed else "取り込み完了")
+        if result.cancelled:
+            title = "取り込みを中断しました"
+        elif result.failed:
+            title = "取り込み完了（一部失敗）"
+        else:
+            title = "取り込み完了"
+        box.setWindowTitle(title)
         box.setIcon(
-            QMessageBox.Icon.Warning if result.failed else QMessageBox.Icon.Information
+            QMessageBox.Icon.Warning
+            if (result.failed or result.cancelled)
+            else QMessageBox.Icon.Information
         )
         box.setText(message)
         open_button = None
@@ -697,7 +810,6 @@ class MainWindow(QMainWindow):
             widget.setEnabled(not busy)
         if busy:
             self._import_button.setEnabled(False)
-            self._dry_run_button.setEnabled(False)
         else:
             self._update_counts()  # 対象の有無で決める
 

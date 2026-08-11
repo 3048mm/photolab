@@ -41,6 +41,8 @@ class ShotModel(QAbstractListModel):
     IsFallbackRole = int(Qt.ItemDataRole.UserRole) + 4
     DurationRole = int(Qt.ItemDataRole.UserRole) + 5
     WarningRole = int(Qt.ItemDataRole.UserRole) + 6
+    IsJpegOnlyRole = int(Qt.ItemDataRole.UserRole) + 7
+    CompositionRole = int(Qt.ItemDataRole.UserRole) + 8
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -141,6 +143,12 @@ class ShotModel(QAbstractListModel):
         if role == self.IsFallbackRole:
             return shot.dedup_key.is_fallback
 
+        if role == self.IsJpegOnlyRole:
+            return shot.shot.is_jpeg_only
+
+        if role == self.CompositionRole:
+            return shot.shot.composition
+
         if role == self.DurationRole:
             return shot.shot.duration_seconds
 
@@ -152,6 +160,10 @@ class ShotModel(QAbstractListModel):
                 f"元ファイル: {shot.shot.source_name}",
                 f"取り込み先: {', '.join(f.dest.name for f in shot.files)}",
             ]
+            if shot.shot.composition:
+                lines.append(f"構成: {shot.shot.composition}")
+            if shot.shot.is_jpeg_only:
+                lines.append("RAW が無いので darktable の設定によっては読み込まれません")
             if shot.already_imported:
                 lines.append("★ 取り込み済み")
             warning = self._warning_text(shot)

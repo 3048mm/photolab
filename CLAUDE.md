@@ -99,7 +99,9 @@ photolab/
           scanner.py copier.py importer.py thumbnail.py config.py developer.py
   ui/     app.py main_window.py shot_model.py shot_delegate.py dest_bar.py
           workers.py theme.py assets/（アプリアイコン）
-tools/    make_icon.py（アイコン生成。生成物はコミット済みで普段は実行不要）
+tools/    make_icon.py     アイコン生成（生成物はコミット済みで普段は実行不要）
+          make_shortcut.ps1 起動ショートカット生成（UTF-8 BOM 付き）
+          hooks/           写真原本保護フック
 tests/    core/ とソースを 1:1 ミラー（156 テスト）
 data/test/  実データのフィクスチャ（git 管理外）
 ```
@@ -119,8 +121,17 @@ $env:PYTHONIOENCODING="utf-8"; $env:PYTHONUTF8="1"; .\venv\Scripts\python.exe -m
 # CLI
 .\venv\Scripts\python.exe -m photolab list
 .\venv\Scripts\python.exe -m photolab import --source L:\ --dest "tmp\out\20260811 テスト" [--dry-run]
-    [--split-by-date] [--open-darktable] [--catalog PATH]
+    [--split-by-date] [--open-darktable] [--develop-jpeg] [--catalog PATH]
+
+# カタログの点検（実ファイルが無い記録の検出。--fix で記録だけ削除）
+.\venv\Scripts\python.exe -m photolab doctor [--fix] [--verify-hash]
+
+# 起動用ショートカットを作る（pythonw なのでコンソール窓が出ない）
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\make_shortcut.ps1 [-Desktop] [-StartMenu]
 ```
+
+> `pythonw` から起動すると **stderr がどこにも出ない**。起動時に落ちた場合は
+> `%LOCALAPPDATA%\Photolab\error.log` に traceback が残り、ダイアログも出る。
 
 **Python 実行は必ず `.\venv\Scripts\python.exe`**（素の `python` は venv 外を拾う）。
 **動作確認の出力先は必ず `tmp/` 配下**にする（`D:\写真` を出力先にしない）。

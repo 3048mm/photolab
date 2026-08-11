@@ -13,8 +13,14 @@ from pathlib import Path
 
 from photolab.core.catalog import Catalog
 from photolab.core.config import default_catalog_path, load_config
-from photolab.core.developer import DeveloperNotFoundError, launch
+from photolab.core.developer import (
+    DeveloperNotFoundError,
+    folder_has_raw,
+    jpeg_only_names,
+    launch,
+)
 from photolab.core.importer import ImportPlan, build_plan, execute
+from photolab.core.maintenance import check_catalog, remove_missing
 from photolab.core.scanner import find_media, scan_card
 
 
@@ -26,6 +32,52 @@ def _print_media() -> int:
     for c in candidates:
         print(c.display_name)
     return 0
+
+
+def _run_doctor(args: argparse.Namespace) -> int:
+    """カタログと実ファイルの食い違いを点検する。"""
+    catalog_path = Path(args.catalog) if args.catalog else default_catalog_path()
+    print(f"カタログ: {catalog_path}")
+
+    with Catalog(catalog_path) as catalog:
+        stale = catalog.abort_stale_batches()
+        if stale:
+            print(f"中断のまま残っていたバッチを aborted にしました: {stale} 件")
+
+        report = check_catalog(catalog, verify_hash=args.verify_hash)
+        print(f"登録: {report.total} 件")
+        print(f"  実ファイルが無い  : {len(report.missing)} 件")
+        if args.verify_hash:
+            print(f"  ハッシュ不一致    : {len(report.hash_mismatch)} 件")
+
+        for row in report.missing[:20]:
+            print(f"    無し: {row['dest_path']}\\{row['dest_name']}")
+        if len(report.missing) > 20:
+            print(f"    ... 他 {len(report.missing) - 20} 件")
+        for row in report.hash_mismatch[:20]:
+            print(f"    不一致: {row['dest_path']}\\{row['dest_name']}")
+
+        if report.ok:
+            print("問題ありません。")
+            return 0
+
+        if not args.fix:
+            print("\n--fix を付けると、実ファイルが無い記録をカタログから削除します。")
+            print("（写真そのものは削除しません）")
+            return 1
+
+        removed = remove_missing(catalog, report)
+        print(f"\nカタログから {removed} 件の記録を削除しました（写真は削除していません）。")
+        print("該当のカットは次回から『未取り込み』として扱われます。")
+
+        if report.hash_mismatch:
+            print(
+                f"⚠ ハッシュ不一致 {len(report.hash_mismatch)} 件は自動では直しません。"
+                "内容が変わっている可能性があります。",
+                file=sys.stderr,
+            )
+            return 1
+        return 0
 
 
 def _print_plan(import_plan: ImportPlan) -> None:
@@ -100,11 +152,26 @@ def _run_import(args: argparse.Namespace) -> int:
 def _open_darktable(args: argparse.Namespace, folder: Path) -> None:
     if not args.open_darktable:
         return
+    include_jpeg = args.develop_jpeg
     try:
         # 表示は launch() が返した「実際に渡した値」を使う（元の引数を出さない）
-        executable, opened = launch(folder, load_config().darktable_executable)
+        executable, opened = launch(
+            folder, load_config().darktable_executable, include_jpeg
+        )
         print(f"darktable を起動しました: {executable}")
         print(f"  読み込ませたフォルダ: {opened}")
+
+        if not include_jpeg and folder_has_raw(opened):
+            print("  RAW があるため JPEG は読み込ませていません（--develop-jpeg で変更）")
+            orphans = jpeg_only_names(opened)
+            if orphans:
+                print(
+                    f"  ⚠ RAW が対になっていない JPEG {len(orphans)} 件も"
+                    "読み込まれません:",
+                    file=sys.stderr,
+                )
+                for name in orphans[:10]:
+                    print(f"      {name}", file=sys.stderr)
 
         # 空フォルダを渡しても darktable は何も表示しない。気づけるようにしておく
         count = sum(1 for p in opened.iterdir() if p.is_file())
@@ -131,6 +198,21 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("list", help="取り込み可能なメディアを一覧する")
     sub.add_parser("gui", help="GUI を起動する")
 
+    p_doctor = sub.add_parser(
+        "doctor", help="カタログと実ファイルの食い違いを点検する"
+    )
+    p_doctor.add_argument("--catalog", help="カタログのパス（既定は %%LOCALAPPDATA%%）")
+    p_doctor.add_argument(
+        "--fix",
+        action="store_true",
+        help="実ファイルが無い記録をカタログから削除する（写真は削除しない）",
+    )
+    p_doctor.add_argument(
+        "--verify-hash",
+        action="store_true",
+        help="ハッシュも照合する（全ファイルを読むので遅い）",
+    )
+
     p_import = sub.add_parser("import", help="メディアから取り込む")
     p_import.add_argument("--source", required=True, help="メディアのルート (例: L:\\)")
     p_import.add_argument("--dest", required=True, help="出力先の撮影フォルダ")
@@ -148,10 +230,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="取り込み後に darktable で開く",
     )
+    p_import.add_argument(
+        "--develop-jpeg",
+        action="store_true",
+        help="darktable に JPEG も読み込ませる（既定: RAW があるフォルダでは JPEG を除外）",
+    )
 
     args = parser.parse_args(argv)
     if args.command == "list":
         return _print_media()
+    if args.command == "doctor":
+        return _run_doctor(args)
     if args.command == "gui":
         # PySide6 は GUI を使うときだけ import する（CLI だけなら不要）
         from photolab.ui.app import main as gui_main

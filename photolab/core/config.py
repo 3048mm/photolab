@@ -67,6 +67,8 @@ class Config:
     darktable_executable: str = ""
     # 取り込んだらそのまま現像に入る流れが自然なので既定で有効にする
     launch_darktable_after_import: bool = True
+    # RAW があるフォルダでは JPEG を現像対象にしない（ペアが二重に入るのを避ける）
+    develop_jpeg: bool = False
 
 
 def suggest_label(path: str, existing: "list[DestRoot]") -> str:
@@ -120,6 +122,7 @@ def load_config(path: Path | None = None) -> Config:
         window_height=int(window.get("height", 800)),
         darktable_executable=str(darktable.get("executable", "")),
         launch_darktable_after_import=bool(darktable.get("launch_after_import", True)),
+        develop_jpeg=bool(darktable.get("develop_jpeg", False)),
     )
 
 
@@ -148,6 +151,7 @@ def save_config(config: Config, path: Path | None = None) -> None:
     lines.append(f"executable = {_quote(config.darktable_executable)}")
     launch = "true" if config.launch_darktable_after_import else "false"
     lines.append(f"launch_after_import = {launch}")
+    lines.append(f"develop_jpeg = {'true' if config.develop_jpeg else 'false'}")
     lines.append("")
 
     path.write_text("\n".join(lines), encoding="utf-8")

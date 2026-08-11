@@ -39,6 +39,34 @@ class Shot:
     def is_video(self) -> bool:
         return any(f.suffix.upper() in (".MOV", ".MP4") for f in self.files)
 
+    @property
+    def has_raw(self) -> bool:
+        return any(f.suffix.upper() == ".NEF" for f in self.files)
+
+    @property
+    def composition(self) -> str:
+        """このカットが何で構成されているか。GUI のバッジに出す。
+
+        現像の元があるか（RAW か JPEG か）が一目で分かるようにするため。
+        """
+        if self.is_video:
+            return ""
+        has_jpeg = any(f.suffix.upper() in (".JPG", ".JPEG") for f in self.files)
+        if self.has_raw and has_jpeg:
+            return "RAW+JPG"
+        if self.has_raw:
+            return "RAW"
+        return "JPG"
+
+    @property
+    def is_jpeg_only(self) -> bool:
+        """RAW が無く JPEG だけのカット。
+
+        Z50 は JPEG 中心で、Z6 のカードにも混ざる（architecture.md §5.4）。
+        現像の元が無いので、GUI で区別できるようにする。
+        """
+        return not self.is_video and not self.has_raw
+
     def to_metadata(self) -> "Metadata":
         """重複判定キーの生成（`core/dedup.py`）に渡すための変換。"""
         from photolab.core.metadata import Metadata

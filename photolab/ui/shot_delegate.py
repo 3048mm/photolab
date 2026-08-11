@@ -123,6 +123,20 @@ class ShotDelegate(QStyledItemDelegate):
                 painter, QPoint(image_rect.left() + 5, image_rect.bottom() - 5)
             )
 
+        # 静止画: 右下に構成（RAW+JPG / RAW / JPG）。
+        # 現像の元があるか、ペアなのかを一目で分かるようにする
+        composition = index.data(ShotModel.CompositionRole)
+        if composition:
+            self._draw_pill(
+                painter,
+                composition,
+                QPoint(image_rect.right() - 5, image_rect.bottom() - 5),
+                theme.JPEG_ONLY_BG
+                if index.data(ShotModel.IsJpegOnlyRole)
+                else theme.BADGE_BG,
+                align_left=False,
+            )
+
         # 動画: 右下に ▶ と再生時間
         if index.data(ShotModel.IsVideoRole):
             duration = _format_duration(index.data(ShotModel.DurationRole))

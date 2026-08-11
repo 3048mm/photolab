@@ -16,6 +16,13 @@ _WINDOWS_CANDIDATES = (
 )
 _POSIX_CANDIDATES = ("/usr/bin/darktable", "/usr/local/bin/darktable")
 
+_RAW_SUFFIXES = frozenset({".NEF"})
+_JPEG_SUFFIXES = frozenset({".JPG", ".JPEG"})
+
+# darktable の「RAW 以外を無視する」設定。`--conf` で一時的に上書きでき、
+# darktablerc には保存されない（`darktable --help`）。
+_IGNORE_NONRAWS_KEY = "ui_last/import_ignore_nonraws"
+
 
 class DeveloperNotFoundError(Exception):
     """darktable の実行ファイルが見つからない。"""
@@ -35,7 +42,38 @@ def find_darktable(configured: str = "") -> Path | None:
     return None
 
 
-def launch(folder: Path, configured: str = "") -> tuple[Path, Path]:
+def folder_has_raw(folder: Path) -> bool:
+    """フォルダ直下に RAW があるか。"""
+    try:
+        return any(p.suffix.upper() in _RAW_SUFFIXES for p in folder.iterdir())
+    except OSError:
+        return False
+
+
+def jpeg_only_names(folder: Path) -> list[str]:
+    """RAW が対になっていない JPEG のファイル名。
+
+    `ignore_nonraws` を有効にすると**このファイルも読み込まれない**。
+    darktable の設定はフォルダ単位で JPEG を一律無視するもので、
+    「ペアのときだけ無視する」ことはできないため
+    （https://darktable-devel.narkive.com/hZKNybMG/）。
+    呼び出し側はこれを利用者に知らせること。
+    """
+    try:
+        files = list(folder.iterdir())
+    except OSError:
+        return []
+    raw_stems = {p.stem for p in files if p.suffix.upper() in _RAW_SUFFIXES}
+    return sorted(
+        p.name
+        for p in files
+        if p.suffix.upper() in _JPEG_SUFFIXES and p.stem not in raw_stems
+    )
+
+
+def launch(
+    folder: Path, configured: str = "", include_jpeg: bool = False
+) -> tuple[Path, Path]:
     """取り込み先フォルダを darktable で開く。
 
     **実際に渡した (実行ファイル, フォルダ) を返す。** 呼び出し側が元の引数を
@@ -47,6 +85,16 @@ def launch(folder: Path, configured: str = "") -> tuple[Path, Path]:
 
     **必ず絶対パスで渡す。** 相対パスだと darktable 側の作業ディレクトリを基準に
     解決され、存在しないフォルダを渡すことになって何も起きない（2026-08-11 に実際に踏んだ）。
+
+    `include_jpeg=False` のとき、フォルダに RAW があれば
+    `--conf ui_last/import_ignore_nonraws=TRUE` を付けて **JPEG を読み込ませない**。
+    RAW+JPEG のペアが両方カタログに入るのを避けるため。
+    フォルダに RAW が無い場合は付けない（付けると何も読み込まれなくなる）。
+
+    **注意**: darktable の設定はフォルダ単位で JPEG を一律無視する。
+    ペアの JPEG だけを狙って外すことはできないので、同じフォルダに
+    「RAW の無い JPEG」があるとそれも読み込まれない。
+    該当ファイルは `jpeg_only_names()` で取得して利用者に知らせること。
 
     **起動を待たない**（`Popen` で投げっぱなしにする）。取り込み後の GUI が
     darktable の終了を待つ形にしてはならない。
@@ -70,9 +118,10 @@ def launch(folder: Path, configured: str = "") -> tuple[Path, Path]:
         # 親プロセス（Photolab）を閉じても darktable が道連れにならないようにする
         creation_flags = getattr(subprocess, "DETACHED_PROCESS", 0)
 
-    subprocess.Popen(
-        [str(executable), str(target)],
-        creationflags=creation_flags,
-        close_fds=True,
-    )
+    command = [str(executable)]
+    if not include_jpeg and folder_has_raw(target):
+        command += ["--conf", f"{_IGNORE_NONRAWS_KEY}=TRUE"]
+    command.append(str(target))
+
+    subprocess.Popen(command, creationflags=creation_flags, close_fds=True)
     return executable, target

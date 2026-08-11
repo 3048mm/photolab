@@ -128,6 +128,19 @@ class Catalog:
         """中断として記録する。**コピー済みファイルの削除はしない**（§7）。"""
         self._close_batch(batch_id, "aborted", file_count)
 
+    def abort_stale_batches(self) -> int:
+        """`running` のまま残ったバッチを中断扱いにする。
+
+        アプリが強制終了されると `finish_batch` も `abort_batch` も呼ばれず、
+        `running` が残り続ける。起動時に片付ける。
+        同時に複数の Photolab を動かさない前提。
+        """
+        with self._conn:
+            cur = self._conn.execute(
+                "UPDATE import_batch SET status = 'aborted' WHERE status = 'running'"
+            )
+        return cur.rowcount
+
     def batch_status(self, batch_id: int) -> str | None:
         row = self._conn.execute(
             "SELECT status FROM import_batch WHERE id = ?", (batch_id,)
@@ -224,6 +237,27 @@ class Catalog:
             "SELECT * FROM imported_media WHERE dedup_key = ?", (dedup_key,)
         ).fetchone()
         return row
+
+    def all_media(self) -> list[sqlite3.Row]:
+        """登録済みメディアを全件返す。点検（`core/maintenance.py`）が使う。"""
+        return self._conn.execute(
+            "SELECT * FROM imported_media ORDER BY dest_path, dest_name"
+        ).fetchall()
+
+    def remove_media(self, dedup_keys) -> int:
+        """記録を消す。**写真ファイルには触れない。**
+
+        消したカットは次回「未取り込み」に戻る。
+        """
+        keys = list(dedup_keys)
+        if not keys:
+            return 0
+        placeholders = ",".join("?" * len(keys))
+        with self._conn:
+            cur = self._conn.execute(
+                f"DELETE FROM imported_media WHERE dedup_key IN ({placeholders})", keys
+            )
+        return cur.rowcount
 
     def media_count(self) -> int:
         row = self._conn.execute("SELECT COUNT(*) AS n FROM imported_media").fetchone()

@@ -6,11 +6,15 @@
 例外は「自分で下地を描くバッジ」で、下地の色を自分で決めているためテーマに依存しない。
 """
 
+import sys
 from pathlib import Path
 
 from PySide6.QtGui import QColor, QFont, QIcon, QPalette
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+
+# タスクバーのグループ化とアイコンに使う識別子（Windows）
+APP_ID = "Photolab.Importer"
 
 # --- 基本の配色（ダーク） -----------------------------------------------
 # 写真を見るツールなので、周囲が暗い方が画像の色が正しく見える
@@ -50,6 +54,8 @@ WARNING_INK = QColor("#4a3800")
 # --- サムネイルの上に重ねるバッジ ---------------------------------------
 BADGE_BG = QColor(16, 20, 28, 190)
 BADGE_INK = QColor(236, 240, 246)
+# RAW が無い＝現像の元が無いカット。動画バッジと同じ位置に出すが色で区別する
+JPEG_ONLY_BG = QColor(150, 96, 30, 215)
 
 # 取り込み済みは「状態の説明」であって操作対象ではない。
 # アクセント色はチェック・選択（操作に関わるもの）のために取っておく。
@@ -117,6 +123,26 @@ def apply(app) -> None:
         from PySide6.QtCore import Qt
 
         hints.setColorScheme(Qt.ColorScheme.Dark)
+
+    _set_windows_app_id()
+
+
+def _set_windows_app_id() -> None:
+    """タスクバーのアイコンを Photolab のものにする。
+
+    pythonw.exe から起動すると、Windows はホスト実行ファイル（Python）の
+    アイコンでグループ化してしまう。独自の AppUserModelID を宣言すると
+    ウィンドウアイコンがタスクバーにも反映される。
+    ウィンドウを作る前に呼ぶこと。
+    """
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+    except (AttributeError, OSError):
+        pass  # 効かなくても起動は妨げない
 
 
 def app_icon() -> QIcon:

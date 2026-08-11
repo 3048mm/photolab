@@ -18,6 +18,9 @@ data/test/
 *.db-journal
 config.toml
 
+# ショートカット（環境固有の絶対パスを含むので共有しない）
+*.lnk
+
 # Claude Code の個人設定（settings.json は共有するので除外しない）
 .claude/settings.local.json
 
