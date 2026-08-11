@@ -7,10 +7,11 @@
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QIcon, QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import QFont, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QGraphicsOpacityEffect,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -34,6 +36,7 @@ from photolab.core.developer import DeveloperNotFoundError, find_darktable, laun
 from photolab.core.importer import build_plan
 from photolab.core.naming import strip_date_prefix, suggest_folder_name
 from photolab.core.scanner import MediaCandidate, find_media
+from photolab.ui import theme
 from photolab.ui.dest_bar import DestRootBar
 from photolab.ui.shot_delegate import ShotDelegate
 from photolab.ui.shot_model import ShotModel
@@ -86,7 +89,11 @@ class MainWindow(QMainWindow):
         layout.addLayout(self._build_media_row())
         layout.addWidget(self._summary_label())
         layout.addWidget(_separator())
-        layout.addWidget(self._build_grid(), stretch=1)
+
+        self._grid_stack = QStackedWidget()
+        self._grid_stack.addWidget(self._build_grid())
+        self._grid_stack.addWidget(self._build_empty_state())
+        layout.addWidget(self._grid_stack, stretch=1)
         layout.addLayout(self._build_selection_row())
         layout.addWidget(_separator())
         layout.addLayout(self._build_dest_rows())
@@ -101,14 +108,54 @@ class MainWindow(QMainWindow):
         self._rescan_button = QPushButton("再検出")
         self._rescan_button.clicked.connect(self.refresh_media)
 
-        row.addWidget(QLabel("媒体"))
+        row.addWidget(QLabel("メディア"))
         row.addWidget(self._media_combo, stretch=1)
         row.addWidget(self._rescan_button)
         return row
 
     def _summary_label(self) -> QLabel:
-        self._summary = QLabel("媒体を検出しています...")
+        self._summary = QLabel("メディアを検出しています...")
         return self._summary
+
+    def _build_empty_state(self) -> QWidget:
+        """媒体が無いときなどにグリッドの代わりに出す。"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        icon = QLabel()
+        icon.setPixmap(theme.app_icon().pixmap(QSize(72, 72)))
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 主役ではないので沈ませる
+        effect = QGraphicsOpacityEffect(icon)
+        effect.setOpacity(0.35)
+        icon.setGraphicsEffect(effect)
+
+        self._empty_title = QLabel()
+        title_font = QFont()
+        title_font.setPointSizeF(title_font.pointSizeF() + 2)
+        self._empty_title.setFont(title_font)
+        self._empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._empty_hint = QLabel()
+        self._empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_hint.setStyleSheet(
+            f"color: {theme.muted_text(self.palette()).name()};"
+        )
+
+        layout.addWidget(icon)
+        layout.addSpacing(theme.GAP)
+        layout.addWidget(self._empty_title)
+        layout.addWidget(self._empty_hint)
+        return widget
+
+    def _show_empty(self, title: str, hint: str = "") -> None:
+        self._empty_title.setText(title)
+        self._empty_hint.setText(hint)
+        self._grid_stack.setCurrentIndex(1)
+
+    def _show_grid(self) -> None:
+        self._grid_stack.setCurrentIndex(0)
 
     def _build_grid(self) -> QListView:
         self._model = ShotModel(self)
@@ -123,8 +170,16 @@ class MainWindow(QMainWindow):
         self._view.setResizeMode(QListView.ResizeMode.Adjust)
         self._view.setUniformItemSizes(True)  # 全アイテム同サイズ = 描画が速い
         self._view.setIconSize(_ICON_SIZE)
-        self._view.setSpacing(6)
+        # タイルを敷き詰めて格子にするため、アイテム間の隙間は空けない
+        self._view.setSpacing(0)
         self._view.setMovement(QListView.Movement.Static)
+        self._view.setFrameShape(QListView.Shape.NoFrame)
+        # 下地はビューポートに設定する。ビュー本体に入れても描画に反映されない
+        viewport = self._view.viewport()
+        view_palette = viewport.palette()
+        view_palette.setColor(viewport.backgroundRole(), theme.GRID_VOID)
+        viewport.setPalette(view_palette)
+        viewport.setAutoFillBackground(True)
         # Shift / Ctrl での範囲選択は ExtendedSelection の標準動作に任せる
         self._view.setSelectionMode(QListView.SelectionMode.ExtendedSelection)
 
@@ -256,10 +311,15 @@ class MainWindow(QMainWindow):
         self._media_combo.blockSignals(False)
 
         if not self._media:
-            self._summary.setText(
-                "媒体が見つかりません。カードを挿して［再検出］を押してください。"
-            )
+            self._summary.setText("メディアが見つかりません")
             self._model.set_plan_empty()
+            self._warning.clear()  # 前の媒体の警告を残さない
+            self._dest_preview.clear()
+            self._plan_signature = None
+            self._show_empty(
+                "カードが見つかりません",
+                "SD カードを挿してから［再検出］を押してください",
+            )
             return
         self._media_combo.setCurrentIndex(0)
         self._on_media_changed()
@@ -392,7 +452,8 @@ class MainWindow(QMainWindow):
             return
         self._stop_thumbnails()
         self._set_busy(True)
-        self._summary.setText("媒体を読み取っています...")
+        self._summary.setText("メディアを読み取っています...")
+        self._show_empty("読み取り中...", f"{candidate.display_name} を走査しています")
 
         dest = self._dest_root() or Path(self._dest_bar.current_path() or ".")
         worker = PlanWorker(candidate.root, dest, self._catalog_path)
@@ -404,6 +465,14 @@ class MainWindow(QMainWindow):
         self._set_busy(False)
         self._model.set_plan(import_plan)
         self._populate_folder_names()
+
+        if import_plan.shots:
+            self._show_grid()
+        else:
+            self._show_empty(
+                "取り込めるファイルがありません",
+                "このカードの DCIM フォルダに対応形式のファイルが見つかりませんでした",
+            )
 
         if not self._folder_name.currentText().strip():
             self._folder_name.setCurrentText(
@@ -459,7 +528,12 @@ class MainWindow(QMainWindow):
         self._model.toggle_rows(self._selected_rows())
 
     def _update_counts(self) -> None:
-        self._count_label.setText(f"取り込む {self._model.checked_count()} カット")
+        count = self._model.checked_count()
+        self._count_label.setText(f"取り込む {count} カット")
+        # 対象が無いときに押せてしまうと、押してから断られることになる
+        if not self._busy:
+            self._import_button.setEnabled(count > 0)
+            self._dry_run_button.setEnabled(count > 0)
 
     # --- 実行 -------------------------------------------------------------
 
@@ -619,13 +693,13 @@ class MainWindow(QMainWindow):
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
-        for widget in (
-            self._import_button,
-            self._dry_run_button,
-            self._rescan_button,
-            self._media_combo,
-        ):
+        for widget in (self._rescan_button, self._media_combo):
             widget.setEnabled(not busy)
+        if busy:
+            self._import_button.setEnabled(False)
+            self._dry_run_button.setEnabled(False)
+        else:
+            self._update_counts()  # 対象の有無で決める
 
     def _on_failed(self, message: str) -> None:
         self._set_busy(False)
@@ -638,6 +712,12 @@ class MainWindow(QMainWindow):
         self._config.window_height = self.height()
         save_config(self._config, self._config_path)
         for thread, _ in list(self._jobs):
-            thread.quit()
-            thread.wait(3000)
+            # 終了直後のスレッドは deleteLater 済みで C++ 側が消えていることがある。
+            # その場合は触るだけで RuntimeError になるので握りつぶす
+            try:
+                thread.quit()
+                thread.wait(3000)
+            except RuntimeError:
+                pass
+        self._jobs.clear()
         super().closeEvent(event)

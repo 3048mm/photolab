@@ -14,20 +14,17 @@
 """
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen, QPolygon
-from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionButton
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPalette, QPen, QPolygon
+from PySide6.QtWidgets import QStyle, QStyledItemDelegate
 
+from photolab.ui import theme
 from photolab.ui.shot_model import ShotModel
 
-_ACCENT = QColor("#4a9eff")
-_WARNING = QColor("#f2c14e")
-_BADGE_BG = QColor(0, 0, 0, 170)
-_IMPORTED_BG = QColor(90, 90, 90, 210)
-
-_PADDING = 6
+_PADDING = 10  # タイル内の余白。アイテム間の隙間は 0 なのでここで間を作る
 _LABEL_HEIGHT = 20
 _CHECKBOX_SIZE = 20
 _UNCHECKED_OPACITY = 0.38
+_CORNER = 0  # 写真の角は落とさない（格子の直線と揃える）
 
 
 def _format_duration(seconds: float | None) -> str:
@@ -72,18 +69,20 @@ class ShotDelegate(QStyledItemDelegate):
         checked = index.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
 
-        # 背景（選択中は薄く敷いて枠と合わせる）
-        if selected:
-            painter.fillRect(option.rect, QColor(_ACCENT.red(), _ACCENT.green(),
-                                                 _ACCENT.blue(), 40))
+        # タイルの下地。隙間なく敷き詰め、区切り線が隣り合って格子になる
+        painter.fillRect(
+            option.rect, theme.TILE_SELECTED if selected else theme.GRID_BASE
+        )
+        painter.setPen(QPen(theme.TILE_BORDER, 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(option.rect.adjusted(0, 0, -1, -1))
 
         self._draw_thumbnail(painter, index, image_rect, checked)
         self._draw_badges(painter, index, image_rect)
         self._draw_checkbox(painter, option, checked)
 
         if selected:
-            pen = QPen(_ACCENT, 3)
-            painter.setPen(pen)
+            painter.setPen(QPen(theme.selection_border(option.palette), 2))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(option.rect.adjusted(1, 1, -2, -2))
 
@@ -107,19 +106,21 @@ class ShotDelegate(QStyledItemDelegate):
         target.moveCenter(image_rect.center())
 
         # 未チェックは暗くする（チェック状態を明るさで表す）
-        painter.setOpacity(1.0 if checked else _UNCHECKED_OPACITY)
         painter.drawPixmap(target, scaled)
-        painter.setOpacity(1.0)
+        if not checked:
+            # 暗幕をかぶせる（不透明度を下げると明るいタイルの上では白く飛ぶ）
+            painter.fillRect(target, theme.UNCHECKED_VEIL)
+
+        # 写真をタイルの下地から浮かせる細い明るい縁
+        painter.setPen(QPen(theme.THUMB_BORDER, 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(target.adjusted(0, 0, -1, -1))
 
     def _draw_badges(self, painter, index, image_rect) -> None:
-        # 取り込み済み: 左下に「済」
+        # 取り込み済み: 左下にチェックマークのバッジ
         if index.data(ShotModel.IsImportedRole):
-            self._draw_pill(
-                painter,
-                "済",
-                QPoint(image_rect.left() + 4, image_rect.bottom() - 4),
-                _IMPORTED_BG,
-                align_left=True,
+            self._draw_imported_badge(
+                painter, QPoint(image_rect.left() + 5, image_rect.bottom() - 5)
             )
 
         # 動画: 右下に ▶ と再生時間
@@ -127,76 +128,145 @@ class ShotDelegate(QStyledItemDelegate):
             duration = _format_duration(index.data(ShotModel.DurationRole))
             self._draw_pill(
                 painter,
-                f"▶ {duration}" if duration else "▶",
-                QPoint(image_rect.right() - 4, image_rect.bottom() - 4),
-                _BADGE_BG,
+                duration,
+                QPoint(image_rect.right() - 5, image_rect.bottom() - 5),
+                theme.BADGE_BG,
                 align_left=False,
+                glyph=True,
             )
 
         # EXIF が取れない: 右上に黄色い △
         if index.data(ShotModel.WarningRole):
             self._draw_warning(painter, QPoint(image_rect.right() - 6, image_rect.top() + 6))
 
-    def _draw_pill(self, painter, text, anchor, background, align_left) -> None:
+    def _draw_pill(self, painter, text, anchor, background, align_left, glyph=False) -> None:
+        """角丸のバッジ。`glyph=True` なら先頭に再生マークを描く。
+
+        再生マークは文字（▶）ではなく多角形で描く。フォントに字形が無い環境で
+        豆腐になるのを避けるため。
+        """
         font = QFont(painter.font())
-        font.setPointSizeF(max(7.5, font.pointSizeF() - 1))
+        font.setPointSizeF(max(7.5, font.pointSizeF() - 0.5))
         painter.setFont(font)
 
-        width = painter.fontMetrics().horizontalAdvance(text) + 12
-        height = painter.fontMetrics().height() + 2
+        metrics = painter.fontMetrics()
+        height = metrics.height() + 4
+        glyph_size = int(height * 0.42)
+        glyph_space = glyph_size + 5 if glyph else 0
+        width = metrics.horizontalAdvance(text) + 14 + glyph_space
         left = anchor.x() if align_left else anchor.x() - width
         rect = QRect(left, anchor.y() - height, width, height)
 
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(background)
-        painter.drawRoundedRect(rect, 3, 3)
-        painter.setPen(QColor("#ffffff"))
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+        painter.drawRoundedRect(rect, height // 2, height // 2)
+
+        painter.setPen(theme.BADGE_INK)
+        text_rect = rect.adjusted(7 + glyph_space, 0, -7, 0)
+        if glyph:
+            top = rect.center().y() - glyph_size // 2
+            painter.setBrush(theme.BADGE_INK)
+            painter.drawPolygon(
+                QPolygon(
+                    [
+                        QPoint(rect.left() + 8, top),
+                        QPoint(rect.left() + 8, top + glyph_size),
+                        QPoint(rect.left() + 8 + int(glyph_size * 0.85), top + glyph_size // 2),
+                    ]
+                )
+            )
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, text)
+
+    def _draw_imported_badge(self, painter, bottom_left) -> None:
+        """取り込み済みを示す丸いチェックバッジ。
+
+        文字（「済」）にしない。字形に依存せず、狭い場所でも読めるため。
+        """
+        size = 20
+        rect = QRect(bottom_left.x(), bottom_left.y() - size, size, size)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 70))
+        painter.drawEllipse(rect.adjusted(0, 1, 0, 2))
+        painter.setBrush(theme.IMPORTED_BG)
+        painter.drawEllipse(rect)
+
+        pen = QPen(theme.IMPORTED_INK, 2.2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPolyline(
+            QPolygon(
+                [
+                    QPoint(rect.left() + 5, rect.center().y()),
+                    QPoint(rect.center().x() - 1, rect.bottom() - 6),
+                    QPoint(rect.right() - 4, rect.top() + 6),
+                ]
+            )
+        )
 
     def _draw_warning(self, painter, top_right) -> None:
-        size = 20
+        """角を丸めた黄色い警告三角。"""
+        size = 21
         left = top_right.x() - size
         top = top_right.y()
-        triangle = QPolygon(
-            [
-                QPoint(left + size // 2, top),
-                QPoint(left, top + size),
-                QPoint(left + size, top + size),
-            ]
-        )
-        painter.setPen(QPen(QColor("#7a5c00"), 1))
-        painter.setBrush(_WARNING)
-        painter.drawPolygon(triangle)
+
+        path = QPainterPath()
+        path.moveTo(left + size / 2, top)
+        path.lineTo(left + size, top + size * 0.9)
+        path.lineTo(left, top + size * 0.9)
+        path.closeSubpath()
+
+        painter.setPen(QPen(QColor(0, 0, 0, 60), 1))
+        painter.setBrush(theme.WARNING)
+        painter.drawPath(path)
 
         font = QFont(painter.font())
         font.setBold(True)
-        font.setPointSizeF(max(7.0, font.pointSizeF() - 1.5))
+        font.setPointSizeF(max(7.0, font.pointSizeF() - 1.0))
         painter.setFont(font)
-        painter.setPen(QColor("#3a2c00"))
+        painter.setPen(theme.WARNING_INK)
         painter.drawText(
-            QRect(left, top + 5, size, size - 5),
+            QRect(left, top + int(size * 0.28), size, size),
             Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
             "!",
         )
 
     def _draw_checkbox(self, painter, option, checked) -> None:
-        rect = self.checkbox_rect(option)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 120))
-        painter.drawRoundedRect(rect.adjusted(-2, -2, 2, 2), 3, 3)
+        """チェックボックスは自前で描く。
 
-        button = QStyleOptionButton()
-        button.rect = rect
-        button.state = QStyle.StateFlag.State_Enabled | (
-            QStyle.StateFlag.State_On if checked else QStyle.StateFlag.State_Off
-        )
-        QStyle.drawPrimitive(
-            option.widget.style(),
-            QStyle.PrimitiveElement.PE_IndicatorCheckBox,
-            button,
-            painter,
-            option.widget,
-        )
+        OS 標準の未チェック表示は白地に薄い枠で、明るい写真の上では消えてしまう。
+        写真の上に置く前提で、影と塗りを自分で決める。
+        """
+        rect = self.checkbox_rect(option)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 70))
+        painter.drawRoundedRect(rect.adjusted(0, 1, 0, 2), 5, 5)
+
+        if checked:
+            painter.setBrush(theme.selection_border(option.palette))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(rect, 5, 5)
+
+            pen = QPen(QColor(255, 255, 255), 2.2)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.drawPolyline(
+                QPolygon(
+                    [
+                        QPoint(rect.left() + 5, rect.center().y()),
+                        QPoint(rect.center().x() - 1, rect.bottom() - 6),
+                        QPoint(rect.right() - 4, rect.top() + 6),
+                    ]
+                )
+            )
+        else:
+            painter.setBrush(QColor(255, 255, 255, 235))
+            painter.setPen(QPen(QColor(0, 0, 0, 110), 1))
+            painter.drawRoundedRect(rect, 5, 5)
 
     def _draw_label(self, painter, option, index, image_rect, checked) -> None:
         """ファイル名。**色はパレットから取る**（ライト/ダークの両方で読めるように）。"""

@@ -21,7 +21,7 @@ from photolab.core.scanner import find_media, scan_card
 def _print_media() -> int:
     candidates = find_media()
     if not candidates:
-        print("媒体が見つかりません（DCIM を持つリムーバブルドライブ）")
+        print("メディアが見つかりません（DCIM を持つリムーバブルドライブ）")
         return 1
     for c in candidates:
         print(c.display_name)
@@ -128,11 +128,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="photolab", description="RAW 取り込みツール")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("list", help="取り込み可能な媒体を一覧する")
+    sub.add_parser("list", help="取り込み可能なメディアを一覧する")
     sub.add_parser("gui", help="GUI を起動する")
 
-    p_import = sub.add_parser("import", help="媒体から取り込む")
-    p_import.add_argument("--source", required=True, help="媒体のルート (例: L:\\)")
+    p_import = sub.add_parser("import", help="メディアから取り込む")
+    p_import.add_argument("--source", required=True, help="メディアのルート (例: L:\\)")
     p_import.add_argument("--dest", required=True, help="出力先の撮影フォルダ")
     p_import.add_argument("--catalog", help="カタログのパス（既定は %%LOCALAPPDATA%%）")
     p_import.add_argument(

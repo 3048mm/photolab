@@ -65,7 +65,8 @@ class Config:
     window_width: int = 1200
     window_height: int = 800
     darktable_executable: str = ""
-    launch_darktable_after_import: bool = False
+    # 取り込んだらそのまま現像に入る流れが自然なので既定で有効にする
+    launch_darktable_after_import: bool = True
 
 
 def suggest_label(path: str, existing: "list[DestRoot]") -> str:
@@ -118,7 +119,7 @@ def load_config(path: Path | None = None) -> Config:
         window_width=int(window.get("width", 1200)),
         window_height=int(window.get("height", 800)),
         darktable_executable=str(darktable.get("executable", "")),
-        launch_darktable_after_import=bool(darktable.get("launch_after_import", False)),
+        launch_darktable_after_import=bool(darktable.get("launch_after_import", True)),
     )
 
 

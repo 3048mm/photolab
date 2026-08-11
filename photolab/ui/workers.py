@@ -35,7 +35,7 @@ class PlanWorker(QObject):
             with Catalog(self._catalog_path) as catalog:
                 self.finished.emit(plan(self._source_root, self._dest_root, catalog))
         except Exception as e:
-            self.failed.emit(f"媒体の読み取りに失敗しました: {e}")
+            self.failed.emit(f"メディアの読み取りに失敗しました: {e}")
 
 
 class ThumbnailWorker(QObject):

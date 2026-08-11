@@ -97,7 +97,9 @@ photolab/
   cli.py  __main__.py
   core/   models.py naming.py metadata.py dedup.py catalog.py
           scanner.py copier.py importer.py thumbnail.py config.py developer.py
-  ui/     app.py main_window.py shot_model.py shot_delegate.py dest_bar.py workers.py
+  ui/     app.py main_window.py shot_model.py shot_delegate.py dest_bar.py
+          workers.py theme.py assets/（アプリアイコン）
+tools/    make_icon.py（アイコン生成。生成物はコミット済みで普段は実行不要）
 tests/    core/ とソースを 1:1 ミラー（156 テスト）
 data/test/  実データのフィクスチャ（git 管理外）
 ```

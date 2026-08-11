@@ -67,6 +67,15 @@ class TestLoadSave:
         loaded = load_config(path)
         assert (loaded.window_width, loaded.window_height) == (1400, 900)
 
+    def test_darktableの自動起動は既定で有効(self, tmp_path):
+        # 取り込んだらそのまま現像に入る流れが自然なため
+        assert load_config(tmp_path / "missing.toml").launch_darktable_after_import is True
+
+    def test_無効にした設定は保持される(self, tmp_path):
+        path = tmp_path / "config.toml"
+        save_config(Config(launch_darktable_after_import=False), path)
+        assert load_config(path).launch_darktable_after_import is False
+
     def test_darktableの設定を保存できる(self, tmp_path):
         path = tmp_path / "config.toml"
         save_config(

@@ -384,7 +384,7 @@ L:\                              ← ボリュームラベル 'NIKON Z 6'
 | 言語 | Python 3.12 | 将来の Linux 移管を考慮 |
 | GUI | **PySide6** 6.11 | Qt の公式 Python バインディング（**LGPLv3**）。サムネイルグリッドは `QListView` の IconMode。Linux でそのまま動く |
 | サムネイル抽出 | `rawpy` (MIT) | NEF の埋め込み JPEG をデコードせず取得。JPG は別経路（§5.4） |
-| サムネイル縮小 | `Pillow` (MIT-CMU) | `draft()` で libjpeg の DCT スケーリングを使い間引いてデコードする |
+| サムネイル縮小 | `Pillow` (MIT-CMU) | `draft()` で libjpeg の DCT スケーリングを使い間引いてデコードする。アプリアイコンの生成にも使う（`tools/make_icon.py`） |
 | EXIF / MakerNote | **自前実装**（標準ライブラリ） | `core/metadata.py`。GPL 依存を避けるため（§5.3 / §7） |
 | ハッシュ | `xxhash` (BSD-2) | xxHash3 |
 | カタログ | 標準 `sqlite3` | `%LOCALAPPDATA%\Photolab\catalog.db` |
@@ -472,8 +472,15 @@ Phase 1 は**しっかり作り込む**方針。
 
 ---
 
-## 11. 未決事項
+## 11. 未決事項・残課題
 
+- **ローカライズ（i18n）** — 現状 UI 文字列は日本語のハードコード。
+  Qt の `tr()` + `.ts` / `.qm`（`pylupdate6` / `lupdate`）へ移すか、
+  自前の辞書にするかを含めて未検討。着手するなら
+  「文字列の抽出 → 翻訳ファイル → 実行時のロケール判定」の順。
+  Linux 移管より優先度は低いが、文字列を各所に散らさない書き方は今から意識する
+- **デザインの作り込み** — アイコン・配色・バッジは一通り整えたが、
+  ダークテーマ以外（ライト）での見え方は未検証
 - Exporter の配布先ルートの具体的なパス（NAS の共有名、OneDrive 側の階層）
 
 > 「自動起動（常駐プロセス）を Phase 1 に含めるか」は **Phase 1.5 に切り出す**ことで解決した
