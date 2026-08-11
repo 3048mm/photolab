@@ -69,6 +69,7 @@ class Metadata:
     camera_serial: str | None = None
     shutter_count: int | None = None
     captured_at: datetime | None = None
+    duration_seconds: float | None = None  # 動画のみ
 
     @property
     def has_still_key(self) -> bool:
@@ -207,7 +208,7 @@ def read_still_metadata(path: Path) -> Metadata:
     )
 
 
-def _iter_boxes(f, end: int):
+def iter_boxes(f, end: int):
     """現在位置から `end` までの QuickTime ボックスを列挙する。
 
     `(型, データ開始位置, ボックス終端)` を返す。
@@ -233,30 +234,72 @@ def _iter_boxes(f, end: int):
 
 
 def read_video_metadata(path: Path) -> Metadata:
-    """MOV / MP4 の `moov/mvhd` から撮影日時を読む。
+    """MOV / MP4 の撮影日時を読む。
 
-    Nikon の MOV は `creation_time` に**ローカル時刻**を書いている
-    （規格上は UTC だがカメラでは一般的な逸脱）。タイムゾーン変換はしない
-    （architecture.md §5.2）。
+    **撮影日時はファイル更新日時（mtime）を使う。** `mvhd` の `creation_time` は
+    使わない。実機資産 21 件の実測（2026-08-09）で、同じ Z6 でも
+    **エポックの解釈が世代で食い違う**ことが分かったため:
+
+    | 撮影時期 | `mvhd` の中身 |
+    | :--- | :--- |
+    | 2019 〜 2021（6件） | ローカル時刻 |
+    | 2022-06 以降（14件） | **UTC**（9時間ずれる） |
+
+    ファームウェアの更新で規格準拠（UTC）に変わったと思われる。
+    どちらの世代でも **mtime は一貫してローカルの撮影時刻**だった
+    （カードの FAT32 にカメラがローカル時刻で書くため）。
+
+    `mvhd` の値は `read_mvhd_creation()` で別途取得でき、整合性の確認に使える。
     """
+    # 秒未満は切り捨てる。命名規則が秒解像度であり、FAT32 の粒度も 2 秒のため
+    return Metadata(
+        captured_at=datetime.fromtimestamp(path.stat().st_mtime).replace(microsecond=0),
+        duration_seconds=read_video_duration(path),
+    )
+
+
+def _read_mvhd(path: Path) -> tuple[datetime, float | None] | None:
+    """`moov/mvhd` から (creation_time, 再生秒数) を返す。"""
     end = path.stat().st_size
     with open(path, "rb") as f:
-        for box_type, body, box_end in _iter_boxes(f, end):
+        for box_type, body, box_end in iter_boxes(f, end):
             if box_type != "moov":
                 continue
             f.seek(body)
-            for sub_type, sub_body, _ in _iter_boxes(f, box_end):
+            for sub_type, sub_body, _ in iter_boxes(f, box_end):
                 if sub_type != "mvhd":
                     continue
                 f.seek(sub_body)
                 version = f.read(1)[0]
                 f.read(3)  # flags
                 if version == 1:
-                    (created,) = struct.unpack(">Q", f.read(8))
+                    created, _modified = struct.unpack(">QQ", f.read(16))
+                    timescale, duration = struct.unpack(">IQ", f.read(12))
                 else:
-                    (created,) = struct.unpack(">I", f.read(4))
-                return Metadata(captured_at=_QT_EPOCH + timedelta(seconds=created))
-    return Metadata()
+                    created, _modified = struct.unpack(">II", f.read(8))
+                    timescale, duration = struct.unpack(">II", f.read(8))
+                seconds = duration / timescale if timescale else None
+                return _QT_EPOCH + timedelta(seconds=created), seconds
+    return None
+
+
+def read_video_duration(path: Path) -> float | None:
+    """動画の再生秒数。GUI のバッジ表示に使う。"""
+    try:
+        result = _read_mvhd(path)
+    except (OSError, struct.error, ValueError, IndexError, OverflowError):
+        return None
+    return result[1] if result else None
+
+
+def read_mvhd_creation(path: Path) -> datetime | None:
+    """`moov/mvhd` の `creation_time` を生のまま返す（診断用）。
+
+    エポックの解釈が世代で食い違うため、**撮影日時としては使わない**
+    （`read_video_metadata` 参照）。
+    """
+    result = _read_mvhd(path)
+    return result[0] if result else None
 
 
 def read_metadata(path: Path) -> Metadata:

@@ -11,6 +11,7 @@ Photolab 本体は MIT ライセンス（`LICENSE`）。
 | PySide6 | LGPLv3 / 商用 | Qt Company 公式バインディング。**動的リンクのまま使う**（同梱時も再リンク可能な形を保つ）。GPL である PyQt5/6 は採用しない |
 | rawpy | MIT | 同梱される LibRaw は LGPL-2.1 / CDDL-1.0 のデュアルライセンス |
 | xxhash | BSD-2-Clause | |
+| Pillow | MIT-CMU | サムネイルの縮小・再エンコード（`core/thumbnail.py`） |
 
 ## 開発時のみの依存（`requirements-dev.txt`）
 

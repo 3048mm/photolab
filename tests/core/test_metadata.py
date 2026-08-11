@@ -7,7 +7,7 @@ from datetime import datetime
 
 import pytest
 
-from photolab.core.metadata import Metadata, read_metadata
+from photolab.core.metadata import Metadata, read_metadata, read_mvhd_creation
 
 
 @pytest.mark.fixtures
@@ -50,11 +50,30 @@ class TestReadJpeg:
 
 @pytest.mark.fixtures
 class TestReadVideo:
-    """MOV は mvhd の creation_time。ローカル時刻なので変換不要（§5.2）。"""
+    """MOV の撮影日時はファイル更新日時を使う。
 
-    def test_MOVから撮影日時を取得できる(self, fixtures):
+    mvhd の creation_time はエポックの解釈が世代で食い違うため使わない
+    （2019-2021 はローカル時刻 / 2022-06 以降は UTC。architecture.md §5.2）。
+    """
+
+    def test_MOVの撮影日時は更新日時から取る(self, fixtures):
+        path = fixtures / "DSC_0114.MOV"
+        expected = datetime.fromtimestamp(path.stat().st_mtime).replace(microsecond=0)
+        assert read_metadata(path).captured_at == expected
+
+    def test_再生時間を取得できる(self, fixtures):
+        # GUI の動画バッジに出す
         meta = read_metadata(fixtures / "DSC_0114.MOV")
-        assert meta.captured_at == datetime(2019, 1, 2, 15, 38, 47)
+        assert meta.duration_seconds == pytest.approx(13.96, abs=0.1)
+
+    def test_静止画は再生時間を持たない(self, fixtures):
+        assert read_metadata(fixtures / "DSC_0017.NEF").duration_seconds is None
+
+    def test_mvhdの値は診断用に取得できる(self, fixtures):
+        # この 2019 年のファイルはローカル時刻が書かれている世代
+        assert read_mvhd_creation(fixtures / "DSC_0114.MOV") == datetime(
+            2019, 1, 2, 15, 38, 47
+        )
 
     def test_MOVはシリアルとショットカウントを持たない(self, fixtures):
         meta = read_metadata(fixtures / "DSC_0114.MOV")

@@ -3,6 +3,7 @@
 #   PySide6 : LGPLv3 — 動的リンクのまま使う。PyQt5/6 は GPL なので採用しない
 #   rawpy   : MIT（同梱 LibRaw は LGPL-2.1 / CDDL のデュアル）
 #   xxhash  : BSD-2-Clause
+#   Pillow  : MIT-CMU — サムネイルの縮小・再エンコード（core/thumbnail.py）
 #
 # EXIF / MakerNote の抽出は photolab/core/metadata.py の自前実装で行う。
 # pyexiv2（GPL-3.0）は requirements-dev.txt 側に隔離している。
@@ -10,3 +11,4 @@
 PySide6
 rawpy
 xxhash
+Pillow

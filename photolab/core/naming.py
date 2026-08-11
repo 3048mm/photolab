@@ -39,6 +39,30 @@ def format_basename(captured_at: datetime, seq: int) -> str:
     return f"{captured_at:%Y%m%d-%H%M%S}_{seq:0{SEQ_DIGITS}d}"
 
 
+def suggest_folder_name(shots: Sequence[Shot]) -> str:
+    """出力先のフォルダ名を提案する（`YYYYMMDD ` + 撮影名）。
+
+    撮影名の部分は空にしておき、ユーザーに入力させる。
+    1枚のカードに複数日が混在するのが普通なので（実機カードは10日分あった）、
+    **最も枚数の多い日**を採る。日付での自動分割はしない（architecture.md §7）。
+    """
+    dates = [s.captured_at.date() for s in shots if s.captured_at is not None]
+    if not dates:
+        return ""
+    most_common = max(set(dates), key=dates.count)
+    return f"{most_common:%Y%m%d} "
+
+
+def strip_date_prefix(folder_name: str) -> str:
+    """フォルダ名の先頭の `YYYYMMDD` を外して撮影名だけを返す。
+
+    日付ごとの振り分け時に、入力済みの `20260807 花火大会` から
+    `花火大会` を取り出して各日付フォルダに付けるために使う。
+    """
+    matched = re.match(r"^\d{8}\s*(.*)$", folder_name.strip())
+    return matched.group(1).strip() if matched else folder_name.strip()
+
+
 def _order_key(shot: Shot) -> tuple:
     """秒内の採番順序。ショットカウント昇順 → 取れなければ元ファイル名昇順。
 

@@ -7,6 +7,10 @@ GUI 非依存であり、PySide6 を import しない。
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from photolab.core.metadata import Metadata
 
 
 @dataclass(frozen=True)
@@ -27,3 +31,21 @@ class Shot:
     source_name: str
     files: tuple[Path, ...] = field(default=())
     size: int = 0
+    camera_model: str | None = None
+    camera_serial: str | None = None
+    duration_seconds: float | None = None  # 動画のみ。GUI のバッジに使う
+
+    @property
+    def is_video(self) -> bool:
+        return any(f.suffix.upper() in (".MOV", ".MP4") for f in self.files)
+
+    def to_metadata(self) -> "Metadata":
+        """重複判定キーの生成（`core/dedup.py`）に渡すための変換。"""
+        from photolab.core.metadata import Metadata
+
+        return Metadata(
+            camera_model=self.camera_model,
+            camera_serial=self.camera_serial,
+            shutter_count=self.shutter_count,
+            captured_at=self.captured_at,
+        )

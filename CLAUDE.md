@@ -89,36 +89,42 @@ SDカード → [Importer] → D:\写真\<機種>\<YYYYMMDD 撮影名>\
 
 ## 現在の状態
 
-**2026-08-07 時点: 構想フェーズ完了、Phase 1（Importer）未着手。**
-コードはまだ存在しない。git も未初期化。
-
-存在するもの:
+**2026-08-11 時点: Phase 1（Importer）実装完了。** CLI と GUI が動作し、
+実機カード（Nikon Z6 / 355 カット）で受け入れテストを通過している。
 
 ```
-doc/architecture.md            設計 source of truth
-doc/agent_execution_rules.md   エージェント共通ルール
-doc/in_progress/_TEMPLATE.md   計画書テンプレート
-tools/hooks/photo_guard.ps1      写真原本保護フック（UTF-8 BOM 付き）
-tools/hooks/test_photo_guard.ps1 上記の回帰テスト（18ケース）
-.claude/settings.json            フック登録
+photolab/
+  cli.py  __main__.py
+  core/   models.py naming.py metadata.py dedup.py catalog.py
+          scanner.py copier.py importer.py thumbnail.py config.py developer.py
+  ui/     app.py main_window.py shot_model.py shot_delegate.py dest_bar.py workers.py
+tests/    core/ とソースを 1:1 ミラー（156 テスト）
+data/test/  実データのフィクスチャ（git 管理外）
 ```
+
+**GUI を触るときは `.claude/skills/photolab-gui/SKILL.md` を必ず読むこと。**
+ワーカーの GC、状態の描き分け、文字色のハードコード禁止など、実際に踏んだ罠を記録している。
 
 ## Commands
 
-**未整備。** venv・`requirements.txt`・`pytest.ini` は Phase 1 着手時に作成する。
-予定しているスタック（`doc/architecture.md` §8）:
+```powershell
+# テスト（data/test/ が無い環境では実データ系が skip される）
+$env:PYTHONIOENCODING="utf-8"; $env:PYTHONUTF8="1"; .\venv\Scripts\python.exe -m pytest tests -q
 
-| 用途 | 選定 |
-| :--- | :--- |
-| 言語 | Python 3.12 (`C:\Users\crazy\AppData\Local\Programs\Python\Python312\python.exe`) |
-| GUI | PySide6 (Qt) — 将来の Linux 移管を考慮 |
-| サムネイル抽出 | `rawpy`（NEF 埋め込み JPEG をデコードせず取得） |
-| EXIF / MakerNote | `pyexiv2`（フォールバック `exiftool`）— Phase 1 冒頭で取得可否を検証する |
-| ハッシュ | `xxhash` |
-| カタログ | 標準 `sqlite3` → `%LOCALAPPDATA%\Photolab\catalog.db` |
-| テスト | `pytest` |
+# GUI
+.\venv\Scripts\python.exe -m photolab gui
 
-Python 実行は venv 作成後は `.\venv\Scripts\python.exe` を使う（素の `python` を使わない）。
+# CLI
+.\venv\Scripts\python.exe -m photolab list
+.\venv\Scripts\python.exe -m photolab import --source L:\ --dest "tmp\out\20260811 テスト" [--dry-run]
+    [--split-by-date] [--open-darktable] [--catalog PATH]
+```
+
+**Python 実行は必ず `.\venv\Scripts\python.exe`**（素の `python` は venv 外を拾う）。
+**動作確認の出力先は必ず `tmp/` 配下**にする（`D:\写真` を出力先にしない）。
+
+技術スタックは `doc/architecture.md` §8。EXIF / MakerNote は **GPL 回避のため自前実装**
+（`core/metadata.py`）であり、`pyexiv2` は開発時の答え合わせ専用（`requirements-dev.txt`）。
 
 ## Coding conventions
 

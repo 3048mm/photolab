@@ -129,6 +129,9 @@ def _build_shot(files: "list[Path]") -> Shot:
         source_name=primary.name,
         files=tuple(sorted(files)),
         size=primary.stat().st_size,
+        camera_model=meta.camera_model,
+        camera_serial=meta.camera_serial,
+        duration_seconds=meta.duration_seconds,
     )
 
 

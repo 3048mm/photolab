@@ -13,6 +13,8 @@ from photolab.core.naming import (
     Shot,
     assign_basenames,
     format_basename,
+    strip_date_prefix,
+    suggest_folder_name,
 )
 
 
@@ -99,6 +101,49 @@ class TestExistingCollision:
         # 20191001-091654002.JPG 形式。末尾3桁は秒内連番ではない（計画書 §7）
         existing = ["20260711-120235010.JPG"]
         assert assign_basenames([shot((12, 2, 35))], existing) == ["20260711-120235_01"]
+
+
+class TestSuggestFolderName:
+    """出力先のフォルダ名を提案する。ユーザーが編集する前提の初期値。"""
+
+    def test_撮影日をYYYYMMDDで前置する(self):
+        assert suggest_folder_name([shot((12, 2, 35))]).startswith("20260711 ")
+
+    def test_最も枚数の多い日を使う(self):
+        # 1枚のカードに複数日が混在する（実機カードは10日分あった）
+        shots = [
+            Shot(datetime(2026, 7, 11, 12, 0, 0), None, "a.NEF"),
+            Shot(datetime(2026, 8, 6, 12, 0, 0), None, "b.NEF"),
+            Shot(datetime(2026, 8, 6, 12, 0, 1), None, "c.NEF"),
+        ]
+        assert suggest_folder_name(shots).startswith("20260806 ")
+
+    def test_撮影日時が無いカットは無視する(self):
+        shots = [
+            Shot(None, None, "x.HEIC"),
+            Shot(datetime(2026, 7, 11, 12, 0, 0), None, "a.NEF"),
+        ]
+        assert suggest_folder_name(shots).startswith("20260711 ")
+
+    def test_カットが無ければ空文字を返す(self):
+        assert suggest_folder_name([]) == ""
+
+
+class TestStripDatePrefix:
+    """日付分割時は、入力済みのフォルダ名から日付部分を外して撮影名だけを使う。"""
+
+    def test_先頭の日付と空白を外す(self):
+        assert strip_date_prefix("20260807 花火大会") == "花火大会"
+
+    def test_日付だけなら空文字になる(self):
+        assert strip_date_prefix("20260807 ") == ""
+        assert strip_date_prefix("20260807") == ""
+
+    def test_日付が無ければそのまま(self):
+        assert strip_date_prefix("花火大会") == "花火大会"
+
+    def test_数字が8桁でなければ日付とみなさない(self):
+        assert strip_date_prefix("2026 花火") == "2026 花火"
 
 
 class TestNoCapturedAt:
