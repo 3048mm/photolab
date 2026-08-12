@@ -10,7 +10,7 @@ QThread はサブクラス化せず、ワーカーを moveToThread する
 
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
 from photolab.core.catalog import Catalog
 from photolab.core.importer import ImportPlan, execute, plan
@@ -95,6 +95,58 @@ class ThumbnailWorker(QObject):
                     self.ready.emit(row, data)
         finally:
             self.finished.emit()
+
+
+class WatchWorker(QObject):
+    """媒体の出現を専用スレッドで見張る。
+
+    **GUI スレッドでファイルシステムに触らないため**にスレッドへ追い出している。
+    空のカードスロットや応答しないカードがあると、ドライブの確認だけで
+    長く待たされることがあり、そのまま UI が固まる（計画書 §7 / 2026-08-12）。
+
+    タイマーは**このスレッドの中で作る**。GUI スレッドで作ったタイマーを
+    moveToThread しても、発火は元のスレッドのままになる。
+    """
+
+    detected = Signal(object)  # MediaCandidate
+
+    def __init__(self, watcher, interval_ms: int):
+        super().__init__()
+        self._watcher = watcher
+        self._interval_ms = interval_ms
+        self._timer: QTimer | None = None
+
+    @Slot()
+    def start(self) -> None:
+        """スレッド開始時に呼ばれる。"""
+        self._timer = QTimer()
+        self._timer.setInterval(self._interval_ms)
+        self._timer.timeout.connect(self.poll)
+        # 起動時に挿さっているカードでいきなり開くと驚くので、
+        # いまの状態を「見たこと」にしてから待ち受ける
+        self._watcher.poll()
+        self._timer.start()
+
+    @Slot()
+    def poll(self) -> None:
+        for candidate in self._watcher.poll():
+            self.detected.emit(candidate)
+
+    @Slot(bool)
+    def set_enabled(self, enabled: bool) -> None:
+        if self._timer is None:
+            return
+        if enabled:
+            # 止めている間に挿された分でいきなり開かないようにする
+            self._watcher.poll()
+            self._timer.start()
+        else:
+            self._timer.stop()
+
+    @Slot()
+    def stop(self) -> None:
+        if self._timer is not None:
+            self._timer.stop()
 
 
 class ImportWorker(QObject):

@@ -89,21 +89,66 @@ def _is_removable(root: Path) -> bool:
     return ctypes.windll.kernel32.GetDriveTypeW(ctypes.c_wchar_p(str(root))) == DRIVE_REMOVABLE
 
 
+class _quiet_device_errors:
+    """空のリムーバブルドライブを叩いてもダイアログを出させない。
+
+    カードリーダーは空のスロットにもドライブレターを割り当てる。そこへ
+    `is_dir()` などでアクセスすると、Windows が
+    「ドライブにディスクを挿入してください」というシステムモーダルを出し、
+    **プロセスが止まって終了もできなくなる**（2026-08-12 に実際に発生）。
+
+    `SetThreadErrorMode` でこのスレッドだけ黙らせ、抜けるときに戻す。
+    プロセス全体の `SetErrorMode` にしないのは、他のスレッドに影響させないため。
+    """
+
+    SEM_FAILCRITICALERRORS = 0x0001
+
+    def __enter__(self):
+        self._previous = None
+        if sys.platform != "win32":
+            return self
+        import ctypes
+
+        previous = ctypes.c_uint()
+        if ctypes.windll.kernel32.SetThreadErrorMode(
+            self.SEM_FAILCRITICALERRORS, ctypes.byref(previous)
+        ):
+            self._previous = previous.value
+        return self
+
+    def __exit__(self, *exc_info):
+        if self._previous is None:
+            return
+        import ctypes
+
+        ctypes.windll.kernel32.SetThreadErrorMode(self._previous, None)
+
+
 def find_media() -> list[MediaCandidate]:
     """リムーバブルドライブを列挙し、DCIM/ を持つものを候補として返す。
 
     Windows 依存の部分はここに閉じ込める。Linux 移管時はこの関数だけ差し替える
     （AutoPlay 連携はしない方針 / architecture.md §5.1）。
+
+    **ドライブ種別を先に見る。** カードリーダーは空のスロットにも
+    ドライブレターを割り当てるため、いきなり `is_dir()` を掛けると
+    メディアの無いドライブを叩くことになる。`GetDriveTypeW` は
+    デバイスに触らずに答えるので、これで大半を除ける。
+    残りも `_quiet_device_errors` の中で調べ、ダイアログを出させない。
     """
     candidates = []
-    for letter in string.ascii_uppercase:
-        root = Path(f"{letter}:\\")
-        try:
-            if not root.is_dir() or not _is_removable(root) or not has_dcim(root):
+    with _quiet_device_errors():
+        for letter in string.ascii_uppercase:
+            root = Path(f"{letter}:\\")
+            # デバイスに触らない判定を先に済ませる
+            if not _is_removable(root):
                 continue
-        except OSError:
-            continue
-        candidates.append(MediaCandidate(root=root, label=_volume_label(root)))
+            try:
+                if not has_dcim(root):
+                    continue
+            except OSError:
+                continue  # メディアが無い / 準備できていない
+            candidates.append(MediaCandidate(root=root, label=_volume_label(root)))
     return candidates
 
 

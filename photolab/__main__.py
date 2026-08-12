@@ -11,6 +11,35 @@ from datetime import datetime
 from photolab.cli import main
 
 
+def _setup_console_encoding() -> None:
+    """コンソールに UTF-8 で出せるようにする。
+
+    PyInstaller で固めると UTF-8 で書き出す一方、日本語版 Windows の
+    コンソールは CP932 で解釈するため文字化けする（2026-08-12 に実測）。
+    コンソール側のコードページを UTF-8 に切り替えて合わせる。
+
+    CP932 に無い文字（⚠ など）も出せるよう、コードページ側を変える方式にした。
+    **元のコードページは終了時に戻す**（呼び出し元のシェルに影響を残さない）。
+    コンソールが無い場合（`pythonw` / GUI 起動）は何もしない。
+    """
+    if sys.platform != "win32":
+        return
+
+    import atexit
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    previous = kernel32.GetConsoleOutputCP()
+    if not previous:
+        return  # コンソールが無い
+    if previous != 65001 and kernel32.SetConsoleOutputCP(65001):
+        atexit.register(kernel32.SetConsoleOutputCP, previous)
+
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def _log_crash(error: BaseException) -> "str | None":
     """traceback をログファイルに書く。書けたらそのパスを返す。"""
     try:
@@ -30,6 +59,7 @@ def _log_crash(error: BaseException) -> "str | None":
 
 if __name__ == "__main__":
     try:
+        _setup_console_encoding()
         sys.exit(main())
     except SystemExit:
         raise

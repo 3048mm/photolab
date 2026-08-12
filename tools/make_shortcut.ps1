@@ -20,7 +20,11 @@ param(
     # デスクトップにも置く
     [switch]$Desktop,
     # スタートメニューにも置く
-    [switch]$StartMenu
+    [switch]$StartMenu,
+    # ログイン時に常駐（photolab watch）を起動する
+    [switch]$Startup,
+    # -Startup で作ったスタートアップ登録を外す
+    [switch]$RemoveStartup
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,34 +41,56 @@ if (-not (Test-Path $icon)) {
 }
 
 function New-PhotolabShortcut {
-    param([string]$Path)
+    param(
+        [string]$Path,
+        [string]$Command = 'gui',
+        [string]$Description = 'Photolab - SD カードから写真を取り込む'
+    )
 
     $shell = New-Object -ComObject WScript.Shell
     $link = $shell.CreateShortcut($Path)
     $link.TargetPath = $pythonw
-    $link.Arguments = '-m photolab gui'
+    $link.Arguments = "-m photolab $Command"
     $link.WorkingDirectory = $root
-    $link.Description = 'Photolab - SD カードから写真を取り込む'
+    $link.Description = $Description
     if (Test-Path $icon) { $link.IconLocation = $icon }
     $link.Save()
 
     Write-Host "作成: $Path"
+    Write-Host "      $pythonw -m photolab $Command"
 }
 
-$targets = @(Join-Path $root 'Photolab.lnk')
+$startupLink = Join-Path ([Environment]::GetFolderPath('Startup')) 'Photolab 常駐.lnk'
+
+if ($RemoveStartup) {
+    if (Test-Path $startupLink) {
+        Remove-Item $startupLink
+        Write-Host "削除: $startupLink"
+        Write-Host 'ログイン時の常駐を解除しました。'
+    }
+    else {
+        Write-Host 'スタートアップ登録はありません。'
+    }
+    return
+}
+
+New-PhotolabShortcut -Path (Join-Path $root 'Photolab.lnk')
+
 if ($Desktop) {
-    $targets += Join-Path ([Environment]::GetFolderPath('Desktop')) 'Photolab.lnk'
+    New-PhotolabShortcut -Path (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Photolab.lnk')
 }
 if ($StartMenu) {
-    $programs = [Environment]::GetFolderPath('Programs')
-    $targets += Join-Path $programs 'Photolab.lnk'
+    New-PhotolabShortcut -Path (Join-Path ([Environment]::GetFolderPath('Programs')) 'Photolab.lnk')
 }
-
-foreach ($target in $targets) {
-    New-PhotolabShortcut -Path $target
+if ($Startup) {
+    # 常駐はタスクトレイに入る。カードを挿すと本体が開く
+    New-PhotolabShortcut -Path $startupLink -Command 'watch' `
+        -Description 'Photolab 常駐 - カードを挿すと取り込み画面を開く'
+    Write-Host ''
+    Write-Host '次回ログインから常駐します。今すぐ動かすなら:'
+    Write-Host "  $pythonw -m photolab watch"
+    Write-Host '解除するには -RemoveStartup を付けて実行してください。'
 }
 
 Write-Host ''
-Write-Host '起動対象 : ' -NoNewline; Write-Host $pythonw
-Write-Host '引数     : -m photolab gui'
 Write-Host '作業場所 : ' -NoNewline; Write-Host $root

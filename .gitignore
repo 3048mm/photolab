@@ -18,6 +18,11 @@ data/test/
 *.db-journal
 config.toml
 
+# 配布物のビルド出力（PyInstaller / Inno Setup）
+dist/
+build/
+*.spec.bak
+
 # ショートカット（環境固有の絶対パスを含むので共有しない）
 *.lnk
 

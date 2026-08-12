@@ -73,6 +73,12 @@ class Config:
     # RAW があるフォルダでは JPEG を現像対象にしない（ペアが二重に入るのを避ける）
     develop_jpeg: bool = False
 
+    # --- 常駐プロセス（Phase 1.5）---
+    # 自動検出そのものの on/off。止めた状態は保存する（勝手に再開すると驚くため）
+    watch_auto_detect: bool = True
+    # 検出したときに本体を開くか。False なら通知だけ出す
+    watch_open_window: bool = True
+
     def executable_for(self, developer_key: str) -> str:
         """現像ソフトごとに設定された実行ファイルのパス。"""
         return {
@@ -121,6 +127,7 @@ def load_config(path: Path | None = None) -> Config:
 
     window = data.get("window", {})
     darktable = data.get("darktable", {})
+    watch = data.get("watch", {})
     return Config(
         dest_roots=[
             DestRoot(label=str(d.get("label", "")), path=str(d.get("path", "")))
@@ -135,6 +142,8 @@ def load_config(path: Path | None = None) -> Config:
         rapidraw_executable=str(darktable.get("rapidraw_executable", "")),
         launch_darktable_after_import=bool(darktable.get("launch_after_import", True)),
         develop_jpeg=bool(darktable.get("develop_jpeg", False)),
+        watch_auto_detect=bool(watch.get("auto_detect", True)),
+        watch_open_window=bool(watch.get("open_window", True)),
     )
 
 
@@ -167,6 +176,11 @@ def save_config(config: Config, path: Path | None = None) -> None:
     launch = "true" if config.launch_darktable_after_import else "false"
     lines.append(f"launch_after_import = {launch}")
     lines.append(f"develop_jpeg = {'true' if config.develop_jpeg else 'false'}")
+    lines.append("")
+
+    lines.append("[watch]")
+    lines.append(f"auto_detect = {'true' if config.watch_auto_detect else 'false'}")
+    lines.append(f"open_window = {'true' if config.watch_open_window else 'false'}")
     lines.append("")
 
     path.write_text("\n".join(lines), encoding="utf-8")

@@ -61,6 +61,32 @@ class ScanWorker(QObject):
 - ワーカーに渡すのは `Path` / `str` / dataclass などの不変値だけにする
 - 例外は握って `failed` シグナルで返す。ワーカー内での未捕捉例外はアプリを落とす
 
+### ⚠ タイマーはワーカースレッドの中で作る
+
+GUI スレッドで作った `QTimer` を `moveToThread` しても、**発火は元のスレッドのまま**。
+定期処理をワーカーで回したいなら、スレッド開始後のスロットの中で `QTimer` を作る。
+
+```python
+@Slot()
+def start(self):          # thread.started から呼ばれる
+    self._timer = QTimer()   # ここで作れば、このスレッドで発火する
+    self._timer.timeout.connect(self.poll)
+    self._timer.start(interval_ms)
+```
+
+別スレッドのタイマーを GUI スレッドから直接 `start()` / `stop()` してはならない。
+**シグナルで依頼する**（`_enable_requested.emit(True)` → ワーカーの `set_enabled`）。
+
+### ⚠ ドライブを走査する処理を GUI スレッドで動かさない
+
+カードリーダーは**空のスロットにもドライブレターを割り当てる**。そこへ
+`is_dir()` を掛けると Windows が「ディスクを挿入してください」のモーダルを出し、
+**プロセスがカーネル内で待機して終了もできなくなる**（2026-08-12 に実際に発生）。
+
+- `GetDriveTypeW`（デバイスに触らない）で先に絞る
+- 残りは `SetThreadErrorMode` + `SEM_FAILCRITICALERRORS` の中で調べる
+- それでも I/O 自体は遅くなりうるので、**走査はワーカースレッドで行う**
+
 ### ⚠ ワーカーへの参照を必ず保持する
 
 `moveToThread()` は **Qt に所有権を渡さない**。ワーカーをローカル変数のままにすると

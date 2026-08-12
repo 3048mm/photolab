@@ -209,6 +209,9 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("list", help="取り込み可能なメディアを一覧する")
     sub.add_parser("gui", help="GUI を起動する")
+    sub.add_parser(
+        "watch", help="タスクトレイに常駐し、カードを挿したら開く"
+    )
 
     p_doctor = sub.add_parser(
         "doctor", help="カタログと実ファイルの食い違いを点検する"
@@ -253,6 +256,11 @@ def main(argv: list[str] | None = None) -> int:
         help="起動する現像ソフト（既定は config.toml の設定）",
     )
 
+    # 引数なしで起動されたら GUI を開く。
+    # 配布版のショートカットやファイルの関連付けから起動される経路のため
+    if argv is None and len(sys.argv) == 1:
+        argv = ["gui"]
+
     args = parser.parse_args(argv)
     if args.command == "list":
         return _print_media()
@@ -263,4 +271,8 @@ def main(argv: list[str] | None = None) -> int:
         from photolab.ui.app import main as gui_main
 
         return gui_main()
+    if args.command == "watch":
+        from photolab.ui.app import run_tray
+
+        return run_tray()
     return _run_import(args)
