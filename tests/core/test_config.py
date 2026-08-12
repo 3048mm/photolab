@@ -76,6 +76,31 @@ class TestLoadSave:
         save_config(Config(launch_darktable_after_import=False), path)
         assert load_config(path).launch_darktable_after_import is False
 
+    def test_現像ソフトの選択を保存できる(self, tmp_path):
+        path = tmp_path / "config.toml"
+        save_config(
+            Config(developer="rapidraw", rapidraw_executable=r"C:\RapidRAW.exe"), path
+        )
+        loaded = load_config(path)
+        assert loaded.developer == "rapidraw"
+        assert loaded.executable_for("rapidraw") == r"C:\RapidRAW.exe"
+
+    def test_既定の現像ソフトはRapidRAW(self, tmp_path):
+        assert load_config(tmp_path / "missing.toml").developer == "rapidraw"
+
+    def test_darktableを選んだ設定は保持される(self, tmp_path):
+        path = tmp_path / "config.toml"
+        save_config(Config(developer="darktable"), path)
+        assert load_config(path).developer == "darktable"
+
+    def test_現像ソフトごとに実行ファイルを持てる(self):
+        config = Config(
+            darktable_executable=r"C:\dt.exe", rapidraw_executable=r"C:\rr.exe"
+        )
+        assert config.executable_for("darktable") == r"C:\dt.exe"
+        assert config.executable_for("rapidraw") == r"C:\rr.exe"
+        assert config.executable_for("unknown") == ""
+
     def test_darktableの設定を保存できる(self, tmp_path):
         path = tmp_path / "config.toml"
         save_config(

@@ -13,6 +13,7 @@ from photolab.core.developer import (
     DeveloperNotFoundError,
     find_darktable,
     folder_has_raw,
+    get_spec,
     jpeg_only_names,
     launch,
 )
@@ -26,6 +27,76 @@ class TestFindDarktable:
 
     def test_設定されたパスが存在しなければNone(self, tmp_path):
         assert find_darktable(str(tmp_path / "missing.exe")) is None
+
+
+class TestSpecs:
+    """現像ソフトの定義。乗り換えを想定して切り替えられるようにしてある。"""
+
+    def test_既定はRapidRAW(self):
+        assert get_spec("").key == "rapidraw"
+
+    def test_未知のキーは既定に落ちる(self):
+        assert get_spec("photoshop").key == "rapidraw"
+
+    def test_darktableも選べる(self):
+        assert get_spec("darktable").key == "darktable"
+        assert get_spec("rapidraw").label == "RapidRAW"
+
+    def test_フォルダを開けるかが定義されている(self):
+        # RapidRAW の CLI はヘッドレス export 専用で、フォルダを開く引数が無い
+        assert get_spec("darktable").opens_folder is True
+        assert get_spec("rapidraw").opens_folder is False
+
+    def test_JPEG除外の可否が定義されている(self):
+        assert get_spec("darktable").can_ignore_jpeg is True
+        assert get_spec("rapidraw").can_ignore_jpeg is False
+
+
+class TestRapidRawLaunch:
+    """フォルダを渡せない現像ソフトの扱い。"""
+
+    @pytest.fixture
+    def recorded(self, monkeypatch):
+        calls = []
+
+        class FakePopen:
+            def __init__(self, args, **kwargs):
+                calls.append(args)
+
+        monkeypatch.setattr(developer.subprocess, "Popen", FakePopen)
+        return calls
+
+    def test_フォルダを引数に渡さない(self, tmp_path, recorded):
+        exe = tmp_path / "RapidRAW.exe"
+        exe.write_bytes(b"")
+        folder = tmp_path / "shoot"
+        folder.mkdir()
+        (folder / "a.NEF").write_bytes(b"")
+
+        launch(folder, configured=str(exe), spec=get_spec("rapidraw"))
+
+        assert recorded[0] == [str(exe)]
+
+    def test_開いたフォルダとしてNoneを返す(self, tmp_path, recorded):
+        exe = tmp_path / "RapidRAW.exe"
+        exe.write_bytes(b"")
+        folder = tmp_path / "shoot"
+        folder.mkdir()
+
+        _executable, opened = launch(folder, str(exe), spec=get_spec("rapidraw"))
+
+        assert opened is None  # 呼び出し側が「開けていない」と分かるように
+
+    def test_JPEG除外の設定は渡さない(self, tmp_path, recorded):
+        exe = tmp_path / "RapidRAW.exe"
+        exe.write_bytes(b"")
+        folder = tmp_path / "shoot"
+        folder.mkdir()
+        (folder / "a.NEF").write_bytes(b"")
+
+        launch(folder, str(exe), include_jpeg=False, spec=get_spec("rapidraw"))
+
+        assert "--conf" not in recorded[0]
 
 
 class TestJpegOnly:
@@ -53,6 +124,14 @@ class TestJpegOnly:
 
 
 class TestLaunch:
+    """フォルダを開ける現像ソフト（darktable）の挙動。"""
+
+    @pytest.fixture(autouse=True)
+    def _darktable_default(self, monkeypatch):
+        # 既定の現像ソフトは RapidRAW だが、このクラスは
+        # 「フォルダを渡して開く」経路を見るので darktable に固定する
+        monkeypatch.setattr(developer, "DEFAULT_DEVELOPER", "darktable")
+
     @pytest.fixture
     def recorded(self, monkeypatch):
         calls = []

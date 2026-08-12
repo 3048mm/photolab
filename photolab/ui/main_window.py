@@ -33,9 +33,11 @@ from photolab.core.config import (
     save_config,
 )
 from photolab.core.developer import (
+    DEVELOPERS,
     DeveloperNotFoundError,
-    find_darktable,
+    find_executable,
     folder_has_raw,
+    get_spec,
     jpeg_only_names,
     launch,
 )
@@ -340,16 +342,20 @@ class MainWindow(QMainWindow):
         bar_row.addWidget(self._progress_label)
 
         button_row = QHBoxLayout()
-        self._open_developer = QCheckBox("取り込み後に darktable で開く")
+
+        # 現像ソフトの選択。乗り換えを想定して差し替えられるようにしてある
+        self._developer_combo = QComboBox()
+        for spec in DEVELOPERS.values():
+            self._developer_combo.addItem(spec.label, spec.key)
+        index = self._developer_combo.findData(self._config.developer)
+        self._developer_combo.setCurrentIndex(max(0, index))
+        self._developer_combo.currentIndexChanged.connect(self._on_developer_changed)
+        button_row.addWidget(QLabel("現像"))
+        button_row.addWidget(self._developer_combo)
+
+        self._open_developer = QCheckBox("取り込み後に開く")
         self._open_developer.setChecked(self._config.launch_darktable_after_import)
         self._open_developer.toggled.connect(self._on_open_developer_toggled)
-        if find_darktable(self._config.darktable_executable) is None:
-            self._open_developer.setEnabled(False)
-            self._open_developer.setChecked(False)
-            self._open_developer.setToolTip(
-                "darktable の実行ファイルが見つかりません。"
-                "config.toml の [darktable] executable にパスを指定してください。"
-            )
         button_row.addWidget(self._open_developer)
 
         # RAW+JPEG のペアが両方 darktable に入るのを避ける。
@@ -363,6 +369,8 @@ class MainWindow(QMainWindow):
         )
         self._develop_jpeg.toggled.connect(self._on_develop_jpeg_toggled)
         button_row.addWidget(self._develop_jpeg)
+
+        self._refresh_developer_state()
 
         self._import_button = QPushButton("取り込み開始")
         self._import_button.setDefault(True)
@@ -687,6 +695,40 @@ class MainWindow(QMainWindow):
         self._config.develop_jpeg = checked
         save_config(self._config, self._config_path)
 
+    def _current_developer(self):
+        return get_spec(self._developer_combo.currentData() or "")
+
+    def _on_developer_changed(self) -> None:
+        self._config.developer = self._current_developer().key
+        save_config(self._config, self._config_path)
+        self._refresh_developer_state()
+
+    def _refresh_developer_state(self) -> None:
+        """選んだ現像ソフトの能力に合わせて操作可否を切り替える。"""
+        spec = self._current_developer()
+        executable = find_executable(spec, self._config.executable_for(spec.key))
+
+        if executable is None:
+            self._open_developer.setEnabled(False)
+            self._open_developer.setChecked(False)
+            self._open_developer.setToolTip(
+                f"{spec.label} の実行ファイルが見つかりません。\n"
+                "config.toml で実行ファイルのパスを指定してください。"
+            )
+        else:
+            self._open_developer.setEnabled(True)
+            tip = f"取り込み後に {spec.label} を起動します。"
+            if not spec.opens_folder:
+                tip += f"\n※ {spec.note}"
+            self._open_developer.setToolTip(tip)
+
+        # JPEG の除外は darktable にしかない手段
+        self._develop_jpeg.setEnabled(spec.can_ignore_jpeg)
+        if not spec.can_ignore_jpeg:
+            self._develop_jpeg.setToolTip(
+                f"{spec.label} には JPEG を除外する手段がありません。"
+            )
+
     def _imported_folder(self, result) -> Path | None:
         """darktable で開くフォルダ。日付分割で複数になる場合は親を返す。"""
         dirs = {f.dest.parent for s in result.imported for f in s.files}
@@ -695,11 +737,12 @@ class MainWindow(QMainWindow):
         return self._dest_root() if dirs else None
 
     def _launch_developer(self, folder: Path) -> None:
+        spec = self._current_developer()
         include_jpeg = self._develop_jpeg.isChecked()
 
         # JPEG を外す設定のとき、RAW の無い JPEG も巻き添えで読み込まれない。
         # darktable 側でペアだけを狙って外すことはできないため、ここで知らせる
-        if not include_jpeg and folder_has_raw(folder):
+        if spec.can_ignore_jpeg and not include_jpeg and folder_has_raw(folder):
             orphans = jpeg_only_names(folder)
             if orphans:
                 listed = "\n".join(f"  {n}" for n in orphans[:10])
@@ -715,15 +758,29 @@ class MainWindow(QMainWindow):
                 )
 
         try:
-            launch(folder, self._config.darktable_executable, include_jpeg)
+            _executable, opened = launch(
+                folder, self._config.executable_for(spec.key), include_jpeg, spec
+            )
         except DeveloperNotFoundError as e:
-            QMessageBox.warning(self, "darktable", str(e))
+            QMessageBox.warning(self, spec.label, str(e))
+            return
         except OSError as e:
             QMessageBox.warning(
                 self,
-                "darktable",
+                spec.label,
                 f"起動できませんでした: {e}\n\n"
-                "既に darktable が起動している場合、多重起動はできません。",
+                f"既に {spec.label} が起動している場合、多重起動できないことがあります。",
+            )
+            return
+
+        if opened is None:
+            # フォルダを渡せない現像ソフト。何が起きるかを先に伝えておく
+            QMessageBox.information(
+                self,
+                spec.label,
+                f"{spec.label} を起動しました。\n\n"
+                f"{spec.note}\n\n"
+                f"取り込み先: {folder}",
             )
 
     def _on_import_finished(self, result) -> None:
@@ -746,7 +803,10 @@ class MainWindow(QMainWindow):
             )
 
         folder = self._imported_folder(result)
-        available = find_darktable(self._config.darktable_executable) is not None
+        spec = self._current_developer()
+        available = (
+            find_executable(spec, self._config.executable_for(spec.key)) is not None
+        )
 
         box = QMessageBox(self)
         if result.cancelled:
@@ -765,7 +825,7 @@ class MainWindow(QMainWindow):
         open_button = None
         if available and folder is not None and result.imported:
             open_button = box.addButton(
-                "darktable で開く", QMessageBox.ButtonRole.ActionRole
+                f"{spec.label} で開く", QMessageBox.ButtonRole.ActionRole
             )
         box.addButton(QMessageBox.StandardButton.Ok)
         box.exec()

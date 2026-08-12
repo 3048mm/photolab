@@ -64,11 +64,21 @@ class Config:
     last_dest_root: str | None = None
     window_width: int = 1200
     window_height: int = 800
+    # 現像ソフトの選択（`core/developer.py` の DEVELOPERS のキー）
+    developer: str = "rapidraw"
     darktable_executable: str = ""
+    rapidraw_executable: str = ""
     # 取り込んだらそのまま現像に入る流れが自然なので既定で有効にする
     launch_darktable_after_import: bool = True
     # RAW があるフォルダでは JPEG を現像対象にしない（ペアが二重に入るのを避ける）
     develop_jpeg: bool = False
+
+    def executable_for(self, developer_key: str) -> str:
+        """現像ソフトごとに設定された実行ファイルのパス。"""
+        return {
+            "darktable": self.darktable_executable,
+            "rapidraw": self.rapidraw_executable,
+        }.get(developer_key, "")
 
 
 def suggest_label(path: str, existing: "list[DestRoot]") -> str:
@@ -120,7 +130,9 @@ def load_config(path: Path | None = None) -> Config:
         last_dest_root=data.get("last_dest_root"),
         window_width=int(window.get("width", 1200)),
         window_height=int(window.get("height", 800)),
+        developer=str(darktable.get("developer", "rapidraw")),
         darktable_executable=str(darktable.get("executable", "")),
+        rapidraw_executable=str(darktable.get("rapidraw_executable", "")),
         launch_darktable_after_import=bool(darktable.get("launch_after_import", True)),
         develop_jpeg=bool(darktable.get("develop_jpeg", False)),
     )
@@ -147,8 +159,11 @@ def save_config(config: Config, path: Path | None = None) -> None:
     lines.append(f"height = {config.window_height}")
     lines.append("")
 
+    # 節の名前は互換のため [darktable] のまま。中身は現像ソフト全般の設定
     lines.append("[darktable]")
+    lines.append(f"developer = {_quote(config.developer)}")
     lines.append(f"executable = {_quote(config.darktable_executable)}")
+    lines.append(f"rapidraw_executable = {_quote(config.rapidraw_executable)}")
     launch = "true" if config.launch_darktable_after_import else "false"
     lines.append(f"launch_after_import = {launch}")
     lines.append(f"develop_jpeg = {'true' if config.develop_jpeg else 'false'}")

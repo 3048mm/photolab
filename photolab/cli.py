@@ -14,8 +14,10 @@ from pathlib import Path
 from photolab.core.catalog import Catalog
 from photolab.core.config import default_catalog_path, load_config
 from photolab.core.developer import (
+    DEVELOPERS,
     DeveloperNotFoundError,
     folder_has_raw,
+    get_spec,
     jpeg_only_names,
     launch,
 )
@@ -152,16 +154,25 @@ def _run_import(args: argparse.Namespace) -> int:
 def _open_darktable(args: argparse.Namespace, folder: Path) -> None:
     if not args.open_darktable:
         return
+    config = load_config()
+    spec = get_spec(args.developer or config.developer)
     include_jpeg = args.develop_jpeg
+
     try:
         # 表示は launch() が返した「実際に渡した値」を使う（元の引数を出さない）
         executable, opened = launch(
-            folder, load_config().darktable_executable, include_jpeg
+            folder, config.executable_for(spec.key), include_jpeg, spec
         )
-        print(f"darktable を起動しました: {executable}")
+        print(f"{spec.label} を起動しました: {executable}")
+
+        if opened is None:
+            print(f"  ※ {spec.note}")
+            print(f"  取り込み先: {folder}")
+            return
+
         print(f"  読み込ませたフォルダ: {opened}")
 
-        if not include_jpeg and folder_has_raw(opened):
+        if spec.can_ignore_jpeg and not include_jpeg and folder_has_raw(opened):
             print("  RAW があるため JPEG は読み込ませていません（--develop-jpeg で変更）")
             orphans = jpeg_only_names(opened)
             if orphans:
@@ -183,12 +194,13 @@ def _open_darktable(args: argparse.Namespace, folder: Path) -> None:
             )
         else:
             print(f"  フォルダ内のファイル: {count} 件")
-        print(
-            "  ※ darktable が既に起動している場合、"
-            "ロックのため新しいプロセスは何もせず終了します。"
-        )
+        if spec.key == "darktable":
+            print(
+                "  ※ darktable が既に起動している場合、"
+                "ロックのため新しいプロセスは何もせず終了します。"
+            )
     except (DeveloperNotFoundError, OSError) as e:
-        print(f"darktable を起動できませんでした: {e}", file=sys.stderr)
+        print(f"{spec.label} を起動できませんでした: {e}", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -234,6 +246,11 @@ def main(argv: list[str] | None = None) -> int:
         "--develop-jpeg",
         action="store_true",
         help="darktable に JPEG も読み込ませる（既定: RAW があるフォルダでは JPEG を除外）",
+    )
+    p_import.add_argument(
+        "--developer",
+        choices=sorted(DEVELOPERS),
+        help="起動する現像ソフト（既定は config.toml の設定）",
     )
 
     args = parser.parse_args(argv)
