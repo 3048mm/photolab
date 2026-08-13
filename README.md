@@ -1,123 +1,178 @@
 # Photolab
 
-SD カードから写真を取り込むツール。Nikon の RAW ワークフローを想定しています。
+カメラの RAW 現像ワークフローを支える自作ツール群。
 
-カードを挿すと自動で立ち上がり、サムネイルを見ながら取り込む写真を選び、
-`YYYYMMDD-hhmmss_NN` の規則でリネームしてコピーします。
-取り込んだあとは現像ソフト（RapidRAW / darktable）を開くところまで面倒を見ます。
-
-**同じ写真を二度取り込みません。** カメラのシリアル番号とショットカウントで
-判定するので、カードを消さずに使い回しても、別のカードに同じカットが入っていても、
-取り込み済みのものはグレーアウトされます。
-
-## できること
-
-- **カードの自動検出** — タスクトレイに常駐し、`DCIM` を持つカードを挿すと開く
-- **サムネイル選択** — RAW+JPEG のペアは1カットとして扱う。動画も一覧に出る
-- **重複判定** — シリアル番号 + ショットカウント。リネームやコピーで壊れない
-- **コピー検証** — xxHash3 で照合し、転送中の破損を検出する
-- **日付ごとの振り分け**（任意）— 1枚のカードに複数日が混在していても分けられる
-- **現像ソフトの起動** — RapidRAW または darktable を取り込み後に開く
-
-## インストール
-
-[Releases](https://github.com/3048mm/photolab/releases) から
-`Photolab-<版>-setup.exe` を取得して実行してください。
-
-管理者権限は要りません。ユーザー単位でインストールされます。
-
-> **SmartScreen の警告について**
->
-> コード署名証明書を使っていないため、初回起動時に
-> 「WindowsによってPCが保護されました」と表示されます。
-> 「詳細情報」→「実行」で進めてください。
-> 気になる場合は下記の手順でソースからビルドできます。
-
-インストーラーでは次を選べます。
-
-| 選択肢 | 内容 |
-| :--- | :--- |
-| デスクトップにショートカット | |
-| ログイン時に常駐 | カードを挿すと取り込み画面が開く |
-| RapidRAW をダウンロードして入れる | 公式リリースから取得（同梱していません） |
-
-## 使い方
-
-1. **出力先の親フォルダを登録する** — 初回だけ `＋` を押して選びます（例 `D:\写真\Z6`）。
-   以降はボタン1つで切り替わります
-2. **カードを挿す** — 常駐していれば自動で開きます
-3. **取り込むカットを選ぶ** — 既定は未取り込みのみ。Shift+クリックで範囲選択
-4. **フォルダ名を決める** — 撮影日が入った名前を提案します。既存フォルダも選べます
-5. **［取り込み開始］**
-
-取り込み中は［中断］で止められます。**途中まで取り込んだファイルは残ります**
-（消えると困るため）。中断したカットは「未取り込み」のままです。
-
-### サムネイルの見方
-
-| 表示 | 意味 |
-| :--- | :--- |
-| チェック | 取り込む対象。クリックしただけでは変わりません |
-| 青い枠 | 選択中（操作の対象） |
-| グレースケール + ✓ バッジ | 取り込み済み |
-| `RAW+JPG` / `RAW` / `JPG` | カットの構成 |
-| `▶ 0:14` | 動画と再生時間 |
-| 黄色い △ | EXIF が取れず、判定が弱いカット |
-
-## コマンドライン
-
-`photolab-cli.exe` を使います（インストール先に同梱）。
+Lightroom のコスト削減のため、**現像本体は darktable / RapidRAW（既製品）に任せ、
+その前後の欠けている工程を自作する**方針です。
 
 ```
-photolab-cli list                      取り込めるカードを一覧する
-photolab-cli import --source L:\ --dest "D:\写真\Z6\20260812 花火" [--dry-run]
-photolab-cli doctor [--fix]            カタログと実ファイルの食い違いを調べる
+SDカード → [Importer] → D:\写真\<機種>\<YYYYMMDD 撮影名>\
+                              ↓
+                     [darktable / RapidRAW]  ← 既製品。内部状態には触らない
+                              ↓
+                    <撮影フォルダ>\darktable\*.jpg
+                              ↓
+                        [Exporter] → NAS / OneDrive
 ```
 
-`doctor` は、取り込んだ後にファイルを消したときに使います。
-**カタログの記録だけを消し、写真には触れません。**
+**利用者向けの説明は [installer/README.md](installer/README.md)** にあります
+（配布物に同梱されるもの）。この README は開発者向けです。
 
-## データの置き場所
+## 状態
 
-```
-%LOCALAPPDATA%\Photolab\catalog.db     取り込み済みの記録
-%LOCALAPPDATA%\Photolab\config.toml    設定
-%LOCALAPPDATA%\Photolab\thumbnails\    サムネイルのキャッシュ
-%LOCALAPPDATA%\Photolab\error.log      起動に失敗したときの記録
-```
+| Phase | 内容 | 状態 |
+| :--- | :--- | :--- |
+| 1 | Importer（取り込み・重複判定・コピー検証・GUI） | 完了 |
+| 1.5 | 常駐プロセスによる自動検出 | 実装済み |
+| 2 | Exporter（NAS / OneDrive への配布） | 未着手 |
+| 3 | XMP 連携（レーティング） | 構想 |
 
-**アンインストールしてもカタログと設定は消しません。** 取り込み済みの記録は
-写真と対で意味を持つため、消すと「取り込んだかどうか」が分からなくなります。
-不要なら上のフォルダを手で削除してください。
+## 着手する前に
 
-## ソースからビルドする
+**[doc/architecture.md](doc/architecture.md) を読んでください。**
+設計上の source of truth であり、実装より優先されます。特に以下は
+コードを読んでも分からない前提知識です。
+
+- **現像ソフトは交換可能な部品として扱う**（§3.1）。`library.db` は読みも書きもしない
+- **カタログは資産管理台帳ではない**（§3.3）。答えるのは「取り込み済みか？」の1問だけ
+- **重複判定キーは Nikon MakerNote のシリアル番号 + ショットカウント**（§5.3）。
+  リネームやコピーで壊れない。このプロジェクトの技術的な肝
+- **やらないと決めたこと一覧**（§7）
+
+`D:\写真` は約820GB・NEF 18,909枚の**撮り直しのできない原本**です。
+書き込み・削除・移動を禁止しており、`tools/hooks/photo_guard.ps1` が機械的に
+ブロックします。詳細は [doc/agent_execution_rules.md](doc/agent_execution_rules.md) §1。
+
+## 開発環境
 
 ```powershell
 py -3.12 -m venv venv
 .\venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+```
 
-# テスト
+**Python 実行は必ず `.\venv\Scripts\python.exe`**（素の `python` は venv 外を拾います）。
+
+### テスト
+
+```powershell
 $env:PYTHONIOENCODING="utf-8"; $env:PYTHONUTF8="1"
 .\venv\Scripts\python.exe -m pytest tests -q
+```
 
-# 実行
-.\venv\Scripts\python.exe -m photolab gui
+`data/test/` に実データのフィクスチャを置くと、実データ系のテストも走ります
+（git 管理外。無い環境では skip されます）。
 
-# インストーラーを作る（Inno Setup が必要: winget install JRSoftware.InnoSetup）
+写真原本保護フックの回帰テスト:
+
+```powershell
+powershell -NoProfile -File tools\hooks\test_photo_guard.ps1
+```
+
+### 実行
+
+```powershell
+.\venv\Scripts\python.exe -m photolab gui        # GUI
+.\venv\Scripts\python.exe -m photolab watch      # タスクトレイに常駐
+.\venv\Scripts\python.exe -m photolab list       # 媒体の一覧
+.\venv\Scripts\python.exe -m photolab import --source L:\ --dest "tmp\out\テスト" --dry-run
+.\venv\Scripts\python.exe -m photolab doctor     # カタログの点検
+```
+
+**動作確認の出力先は必ず `tmp/` 配下**にしてください（`D:\写真` を出力先にしない）。
+
+コンソール窓なしで起動するショートカットを作る:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\make_shortcut.ps1 [-Desktop] [-StartMenu] [-Startup]
+```
+
+## ビルドとインストーラー
+
+ビルドとインストーラー作成は**別のスクリプト**です。配置版だけ欲しい場合に
+Inno Setup を要求しないためです。
+
+### 1. 配置版をビルドする
+
+```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\build.ps1
 ```
 
-## ライセンス
+- テスト → PyInstaller（onedir）→ `dist\Photolab\`
+- **GPL 依存（pyexiv2 / exiv2）が混入していないか検査**し、あれば失敗します
+- `-SkipTests` でテストを飛ばせます（普段は付けない）
+- `-DistPath` で出力先を変えられます
 
-Photolab 本体は [MIT](LICENSE)。
+出力は約 160MB、実行ファイルは2つです。
 
-**製品コードに GPL の依存を持たない方針**です。EXIF / Nikon MakerNote の解析は
-標準ライブラリだけで自前実装しています。依存とライセンスの一覧は [NOTICE.md](NOTICE.md)。
+| ファイル | 用途 |
+| :--- | :--- |
+| `Photolab.exe` | コンソール無し。引数なしで GUI、`watch` で常駐 |
+| `photolab-cli.exe` | コンソールあり。`doctor` や `import` 用 |
 
-現像ソフト（RapidRAW: AGPL-3.0 / darktable: GPL-3.0）は**同梱していません**。
-コマンドラインで起動するだけなので、Photolab のライセンスには影響しません。
+### 2. インストーラーを作る
 
-## 設計について
+```powershell
+winget install JRSoftware.InnoSetup   # 初回だけ
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\make_installer.ps1
+```
 
-設計の意図と「やらないと決めたこと」は [doc/architecture.md](doc/architecture.md)
-に書いてあります。実装より優先される文書です。
+`dist\Photolab-<版>-setup.exe` ができます（約 44MB）。
+版は `photolab/__init__.py` の `__version__` を正とし、`-Version` で上書きできます。
+
+インストーラーの仕様は [installer/photolab.iss](installer/photolab.iss)。
+
+- **管理者権限を要求しない**（ユーザー単位でインストール）
+- 選択項目: デスクトップのショートカット / ログイン時の常駐 / RapidRAW の取得
+- **アンインストールでもカタログと設定は消しません**（写真と対で意味を持つため）
+
+### アイコンを作り直す
+
+```powershell
+.\venv\Scripts\python.exe tools\make_icon.py
+```
+
+生成物はコミット済みなので、普段は実行不要です。
+
+## 構成
+
+```
+photolab/
+  cli.py  __main__.py
+  core/   models.py naming.py metadata.py dedup.py catalog.py scanner.py
+          copier.py importer.py thumbnail.py config.py developer.py
+          maintenance.py watcher.py single_instance.py
+  ui/     app.py main_window.py shot_model.py shot_delegate.py dest_bar.py
+          tray.py workers.py theme.py assets/
+tests/    core/ とソースを 1:1 ミラー
+tools/    build.ps1 make_installer.ps1 make_shortcut.ps1 make_icon.py
+          install_rapidraw.ps1 hooks/
+installer/ photolab.iss  README.md（利用者向け）
+doc/      architecture.md  agent_execution_rules.md  completed/  in_progress/
+```
+
+**GUI を触るときは `.claude/skills/photolab-gui/SKILL.md` を必ず読んでください。**
+ワーカーの GC、タイマーのスレッド、状態の描き分けなど、実際に踏んだ罠が書いてあります。
+
+`core/` は GUI 非依存です。**PySide6 を import しないでください。**
+
+## ライセンス方針
+
+本体は [MIT](LICENSE)。**製品コードに GPL の依存を持ちません。**
+
+EXIF / Nikon MakerNote / QuickTime の解析は標準ライブラリだけで自前実装しています
+（`core/metadata.py`）。`pyexiv2` は GPL-3.0 なので**開発時の答え合わせ専用**とし、
+`requirements-dev.txt` に隔離しています。ビルドスクリプトが混入を検査します。
+
+依存とライセンスの一覧は [NOTICE.md](NOTICE.md)。
+
+## 進め方
+
+新機能は**計画書ベース**で進めます（[doc/agent_execution_rules.md](doc/agent_execution_rules.md) §8）。
+
+1. `doc/in_progress/_TEMPLATE.md` をコピーして計画書を作る
+2. **着手前に「ユーザー確認事項」をレビューして合意する**
+3. 作業中はチェックリストと課題を随時更新する
+4. 完了後 `doc/completed/` へ移す
+
+TDD（red-green-refactor）を基本とします。設計判断は `doc/architecture.md` に反映し、
+特に「やらないと決めたこと」は §7 に追記して再提案を防ぎます。

@@ -69,7 +69,9 @@ Name: "rapidraw"; Description: "RapidRAW（現像ソフト）をダウンロー�
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\tools\install_rapidraw.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "..\NOTICE.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
+; 同梱するのは**利用者向け**の README（installer\README.md）。
+; リポジトリ直下の README.md は開発者向けなので配らない
+Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"

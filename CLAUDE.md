@@ -89,19 +89,25 @@ SDカード → [Importer] → D:\写真\<機種>\<YYYYMMDD 撮影名>\
 
 ## 現在の状態
 
-**2026-08-11 時点: Phase 1（Importer）実装完了。** CLI と GUI が動作し、
-実機カード（Nikon Z6 / 355 カット）で受け入れテストを通過している。
+**2026-08-12 時点: Phase 1（Importer）+ Phase 1.5（常駐）完了、配布可能。**
+実機カード（Nikon Z6 / 355 カット）で受け入れテストを通過し、
+インストーラーからの導入も確認済み。テスト 219 件。
 
 ```
 photolab/
   cli.py  __main__.py
-  core/   models.py naming.py metadata.py dedup.py catalog.py
-          scanner.py copier.py importer.py thumbnail.py config.py developer.py
+  core/   models.py naming.py metadata.py dedup.py catalog.py scanner.py
+          copier.py importer.py thumbnail.py config.py developer.py
+          maintenance.py watcher.py single_instance.py
   ui/     app.py main_window.py shot_model.py shot_delegate.py dest_bar.py
-          workers.py theme.py assets/（アプリアイコン）
-tools/    make_icon.py     アイコン生成（生成物はコミット済みで普段は実行不要）
-          make_shortcut.ps1 起動ショートカット生成（UTF-8 BOM 付き）
-          hooks/           写真原本保護フック
+          tray.py workers.py theme.py assets/（アプリアイコン）
+tools/    build.ps1         配置版のビルド（PyInstaller / GPL 混入検査つき）
+          make_installer.ps1 インストーラー生成（Inno Setup）
+          make_shortcut.ps1  起動ショートカット生成
+          make_icon.py       アイコン生成（生成物はコミット済み）
+          install_rapidraw.ps1 RapidRAW を公式から取得（同梱しない）
+          hooks/             写真原本保護フック
+installer/ photolab.iss  README.md（**利用者向け**。配布物に同梱）
 tests/    core/ とソースを 1:1 ミラー（156 テスト）
 data/test/  実データのフィクスチャ（git 管理外）
 ```
@@ -115,8 +121,9 @@ data/test/  実データのフィクスチャ（git 管理外）
 # テスト（data/test/ が無い環境では実データ系が skip される）
 $env:PYTHONIOENCODING="utf-8"; $env:PYTHONUTF8="1"; .\venv\Scripts\python.exe -m pytest tests -q
 
-# GUI
+# GUI / 常駐
 .\venv\Scripts\python.exe -m photolab gui
+.\venv\Scripts\python.exe -m photolab watch    # タスクトレイに常駐
 
 # CLI
 .\venv\Scripts\python.exe -m photolab list
@@ -127,8 +134,15 @@ $env:PYTHONIOENCODING="utf-8"; $env:PYTHONUTF8="1"; .\venv\Scripts\python.exe -m
 .\venv\Scripts\python.exe -m photolab doctor [--fix] [--verify-hash]
 
 # 起動用ショートカットを作る（pythonw なのでコンソール窓が出ない）
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\make_shortcut.ps1 [-Desktop] [-StartMenu]
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\make_shortcut.ps1 [-Desktop] [-StartMenu] [-Startup]
+
+# 配布物を作る（ビルドとインストーラーは別スクリプト）
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\make_installer.ps1
 ```
+
+**README は2つある。** `README.md` は開発者向け、`installer/README.md` は
+**利用者向け**（配布物に同梱される）。利用者向けの説明を前者に書かない。
 
 > `pythonw` から起動すると **stderr がどこにも出ない**。起動時に落ちた場合は
 > `%LOCALAPPDATA%\Photolab\error.log` に traceback が残り、ダイアログも出る。
