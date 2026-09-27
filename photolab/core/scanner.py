@@ -79,14 +79,28 @@ def _volume_label(root: Path) -> str:
     return buffer.value if ok else ""
 
 
-def _is_removable(root: Path) -> bool:
-    """リムーバブルドライブか判定する。"""
+DRIVE_REMOVABLE = 2
+DRIVE_FIXED = 3
+
+
+def is_candidate_drive_type(drive_type: int) -> bool:
+    """媒体候補にするドライブ種別か判定する（`GetDriveTypeW` の戻り値）。
+
+    リムーバブルだけでなく**固定ドライブも含める。** 高速カードリーダー
+    （USB 3.x / UHS-II）は SD カードを固定ディスクとして見せることがある
+    （2026-09-28 に M: で実際に発生）。最終判定は DCIM/ の有無で行う。
+    ネットワーク・CD-ROM・RAM ディスクは除く。
+    """
+    return drive_type in (DRIVE_REMOVABLE, DRIVE_FIXED)
+
+
+def _is_candidate_drive(root: Path) -> bool:
+    """媒体候補になりうるドライブか判定する。デバイスには触らない。"""
     if sys.platform != "win32":
         return True  # Linux 移管時はマウントポイントの列挙側で絞る
     import ctypes
 
-    DRIVE_REMOVABLE = 2
-    return ctypes.windll.kernel32.GetDriveTypeW(ctypes.c_wchar_p(str(root))) == DRIVE_REMOVABLE
+    return is_candidate_drive_type(ctypes.windll.kernel32.GetDriveTypeW(ctypes.c_wchar_p(str(root))))
 
 
 class _quiet_device_errors:
@@ -125,7 +139,7 @@ class _quiet_device_errors:
 
 
 def find_media() -> list[MediaCandidate]:
-    """リムーバブルドライブを列挙し、DCIM/ を持つものを候補として返す。
+    """リムーバブル・固定ドライブを列挙し、DCIM/ を持つものを候補として返す。
 
     Windows 依存の部分はここに閉じ込める。Linux 移管時はこの関数だけ差し替える
     （AutoPlay 連携はしない方針 / architecture.md §5.1）。
@@ -141,7 +155,7 @@ def find_media() -> list[MediaCandidate]:
         for letter in string.ascii_uppercase:
             root = Path(f"{letter}:\\")
             # デバイスに触らない判定を先に済ませる
-            if not _is_removable(root):
+            if not _is_candidate_drive(root):
                 continue
             try:
                 if not has_dcim(root):

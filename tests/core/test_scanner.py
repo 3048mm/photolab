@@ -16,7 +16,13 @@
 
 import pytest
 
-from photolab.core.scanner import MediaCandidate, has_dcim, is_excluded, scan_card
+from photolab.core.scanner import (
+    MediaCandidate,
+    has_dcim,
+    is_candidate_drive_type,
+    is_excluded,
+    scan_card,
+)
 
 
 class TestExclusions:
@@ -135,3 +141,19 @@ class TestMediaCandidate:
     def test_ラベルが無ければパスだけ表示する(self, tmp_path):
         candidate = MediaCandidate(root=tmp_path, label="")
         assert candidate.display_name == str(tmp_path)
+
+
+class TestDriveType:
+    """媒体候補にするドライブ種別（GetDriveTypeW の戻り値）。
+
+    高速カードリーダー（USB 3.x / UHS-II）は SD カードを固定ディスクとして
+    見せることがある（2026-09-28 に M: で実際に発生）。
+    """
+
+    @pytest.mark.parametrize("drive_type", [2, 3])  # REMOVABLE / FIXED
+    def test_candidate(self, drive_type):
+        assert is_candidate_drive_type(drive_type)
+
+    @pytest.mark.parametrize("drive_type", [0, 1, 4, 5, 6])  # 不明/無効/NW/CD/RAM
+    def test_not_candidate(self, drive_type):
+        assert not is_candidate_drive_type(drive_type)
