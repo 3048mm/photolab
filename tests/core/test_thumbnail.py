@@ -50,6 +50,20 @@ class TestThumbnailBytes:
         data = thumbnail_bytes(fixtures / "DSC_0114.MOV", max_size=256)
         assert max(jpeg_dimensions(data)) <= 256
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "IMG_0001.CR2",  # Canon EOS 40D
+            "IMG_0487.CR3",  # Canon EOS R10
+            "RAW_SONY_NEX7.ARW",
+        ],
+    )
+    def test_他社RAWからもサムネイルを作れる(self, fixtures, name):
+        # NEF と同じく埋め込み JPEG プレビューを取り出す（§5.4）
+        data = thumbnail_bytes(fixtures / name, max_size=256)
+        assert data is not None
+        assert max(jpeg_dimensions(data)) <= 256
+
     def test_動画以外の未対応拡張子はNoneを返す(self, tmp_path):
         path = tmp_path / "NIKON001.DSC"
         path.write_bytes(b"x" * 32)

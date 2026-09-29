@@ -2,7 +2,7 @@
 
 方針（architecture.md §5.4）:
 
-- **NEF は埋め込み JPEG プレビューを取り出す。** フルデコード（デモザイク）はしない。
+- **RAW（NEF / CR2 / CR3 / ARW）は埋め込み JPEG プレビューを取り出す。** フルデコード（デモザイク）はしない。
   `rawpy.extract_thumb()` は埋め込み JPEG のバイト列をデコードせず返すため高速
 - **JPG は自身をデコードして縮小する。** Z50 は JPEG 中心であり、
   JPEG 単独カットは一級市民として扱う
@@ -22,6 +22,7 @@ from PIL import Image
 
 from photolab.core.config import data_dir
 from photolab.core.metadata import iter_boxes
+from photolab.core.models import RAW_SUFFIXES
 
 # サムネイルの長辺。グリッドの表示サイズに対して余裕を持たせる
 DEFAULT_MAX_SIZE = 512
@@ -29,7 +30,6 @@ DEFAULT_MAX_SIZE = 512
 # 保存時の JPEG 品質。表示用なので画質より容量を優先する
 _JPEG_QUALITY = 85
 
-_RAW_SUFFIXES = frozenset({".NEF"})
 _JPEG_SUFFIXES = frozenset({".JPG", ".JPEG"})
 _VIDEO_SUFFIXES = frozenset({".MOV", ".MP4"})
 
@@ -92,7 +92,8 @@ def _nikon_video_preview(path: Path) -> bytes | None:
 def _embedded_preview(path: Path) -> bytes | None:
     """縮小前の元データを取り出す。"""
     suffix = path.suffix.upper()
-    if suffix in _RAW_SUFFIXES:
+    # CR2 / ARW は TIFF、CR3 は ISOBMFF だが、どれも rawpy で埋め込み JPEG を取り出せる
+    if suffix in RAW_SUFFIXES:
         with rawpy.imread(str(path)) as raw:
             thumb = raw.extract_thumb()
         if thumb.format == rawpy.ThumbFormat.JPEG:

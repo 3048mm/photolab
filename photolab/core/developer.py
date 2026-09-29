@@ -17,7 +17,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-_RAW_SUFFIXES = frozenset({".NEF"})
+from photolab.core.models import RAW_SUFFIXES
+
 _JPEG_SUFFIXES = frozenset({".JPG", ".JPEG"})
 
 # darktable の「RAW 以外を無視する」設定。`--conf` で一時的に上書きでき、
@@ -108,7 +109,7 @@ def find_executable(spec: DeveloperSpec, configured: str = "") -> Path | None:
 def folder_has_raw(folder: Path) -> bool:
     """フォルダ直下に RAW があるか。"""
     try:
-        return any(p.suffix.upper() in _RAW_SUFFIXES for p in folder.iterdir())
+        return any(p.suffix.upper() in RAW_SUFFIXES for p in folder.iterdir())
     except OSError:
         return False
 
@@ -124,7 +125,7 @@ def jpeg_only_names(folder: Path) -> list[str]:
         files = list(folder.iterdir())
     except OSError:
         return []
-    raw_stems = {p.stem for p in files if p.suffix.upper() in _RAW_SUFFIXES}
+    raw_stems = {p.stem for p in files if p.suffix.upper() in RAW_SUFFIXES}
     return sorted(
         p.name
         for p in files

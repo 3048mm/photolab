@@ -18,16 +18,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from photolab.core.metadata import read_metadata
-from photolab.core.models import Shot
+from photolab.core.models import RAW_SUFFIXES, Shot
 
 # 取り込み対象はここだけを見る。カードのルートにはカメラの管理ファイルがある。
 DCIM_DIR = "DCIM"
 
 # 取り込み対象の拡張子。許可リスト方式にする。
-MEDIA_SUFFIXES = frozenset({".NEF", ".JPG", ".JPEG", ".MOV", ".MP4"})
-
-# カットの代表ファイルとして優先する拡張子。
-RAW_SUFFIXES = frozenset({".NEF"})
+MEDIA_SUFFIXES = RAW_SUFFIXES | {".JPG", ".JPEG", ".MOV", ".MP4"}
 
 # 許可リストに載っていても明示的に除外するもの（architecture.md §5.5）。
 # 現状は許可リストで弾けるが、意図を残すために名前で持っておく。

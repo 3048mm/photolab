@@ -38,6 +38,10 @@ _TAG_EXIF_IFD = 0x8769
 _TAG_DATETIME_ORIGINAL = 0x9003
 _TAG_MAKERNOTE = 0x927C
 
+# CR3 のメタデータは `moov/uuid`（この UUID）の中に TIFF として入っている。
+#   CMT1 = IFD0（機種など） / CMT2 = Exif IFD（撮影日時など）
+_CANON_CR3_UUID = bytes.fromhex("85c0b687820f11e08111f4ce462b6a48")
+
 _TAG_NIKON_SERIAL = 0x001D
 _TAG_NIKON_SHUTTER_COUNT = 0x00A7
 
@@ -52,7 +56,9 @@ _EXIF_DATETIME_FORMAT = "%Y:%m:%d %H:%M:%S"
 # QuickTime のエポックは 1904-01-01 00:00:00（ローカル時刻で書かれる）
 _QT_EPOCH = datetime(1904, 1, 1)
 
-_STILL_SUFFIXES = {".NEF", ".JPG", ".JPEG"}
+# CR2 / ARW は NEF と同じく素の TIFF なので、同じパーサで読める
+_STILL_SUFFIXES = {".NEF", ".CR2", ".ARW", ".JPG", ".JPEG"}
+_CR3_SUFFIXES = {".CR3"}
 _VIDEO_SUFFIXES = {".MOV", ".MP4"}
 
 
@@ -170,7 +176,7 @@ def _parse_exif_datetime(value: object) -> datetime | None:
 
 
 def read_still_metadata(path: Path) -> Metadata:
-    """NEF / JPG からメタデータを読む。"""
+    """NEF / CR2 / ARW / JPG からメタデータを読む。"""
     with open(path, "rb") as f:
         buf = f.read(_HEADER_READ_SIZE)
 
@@ -205,6 +211,48 @@ def read_still_metadata(path: Path) -> Metadata:
         camera_serial=serial,
         shutter_count=shutter_count,
         captured_at=captured_at,
+    )
+
+
+def _read_tiff_ifd0(buf: bytes | None) -> dict:
+    """単独の TIFF（CR3 の CMT1 / CMT2）の先頭 IFD を読む。読めなければ空。"""
+    if not buf:
+        return {}
+    endian, ifd0 = _parse_tiff_header(buf, 0)
+    if endian is None:
+        return {}
+    return _read_ifd(buf, 0, ifd0, endian)
+
+
+def read_cr3_metadata(path: Path) -> Metadata:
+    """CR3（ISOBMFF）から機種と撮影日時を読む。
+
+    Canon のショットカウントは標準のメタデータに無いので読まない。
+    重複判定は退避キーに落ちる（計画書 other_raw_plan.md §4 Q1）。
+    """
+    blocks: dict[str, bytes] = {}
+    end = path.stat().st_size
+    with open(path, "rb") as f:
+        for name, body, box_end in iter_boxes(f, end):
+            if name != "moov":
+                continue
+            f.seek(body)
+            for sub_name, sub_body, sub_end in iter_boxes(f, box_end):
+                if sub_name != "uuid":
+                    continue
+                f.seek(sub_body)
+                if f.read(16) != _CANON_CR3_UUID:
+                    continue
+                for atom, atom_body, atom_end in iter_boxes(f, sub_end):
+                    if atom in ("CMT1", "CMT2"):
+                        f.seek(atom_body)
+                        blocks[atom] = f.read(atom_end - atom_body)
+
+    model = _read_tiff_ifd0(blocks.get("CMT1")).get(_TAG_MODEL)
+    exif_tags = _read_tiff_ifd0(blocks.get("CMT2"))
+    return Metadata(
+        camera_model=model if isinstance(model, str) else None,
+        captured_at=_parse_exif_datetime(exif_tags.get(_TAG_DATETIME_ORIGINAL)),
     )
 
 
@@ -312,6 +360,8 @@ def read_metadata(path: Path) -> Metadata:
     try:
         if suffix in _STILL_SUFFIXES:
             return read_still_metadata(path)
+        if suffix in _CR3_SUFFIXES:
+            return read_cr3_metadata(path)
         if suffix in _VIDEO_SUFFIXES:
             return read_video_metadata(path)
     except (OSError, struct.error, ValueError, IndexError, OverflowError):

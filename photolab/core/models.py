@@ -12,6 +12,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from photolab.core.metadata import Metadata
 
+# 取り込み・サムネイル・現像ソフト連携が「RAW」として扱う拡張子。
+# 形式の追加はここだけで済むように一本化する。
+# Canon / Sony はショットカウントが取れず、重複判定は退避キーになる（architecture.md §5.3）
+RAW_SUFFIXES = frozenset({".NEF", ".CR2", ".CR3", ".ARW"})
+
 
 @dataclass(frozen=True)
 class Shot:
@@ -41,7 +46,7 @@ class Shot:
 
     @property
     def has_raw(self) -> bool:
-        return any(f.suffix.upper() == ".NEF" for f in self.files)
+        return any(f.suffix.upper() in RAW_SUFFIXES for f in self.files)
 
     @property
     def composition(self) -> str:

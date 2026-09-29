@@ -43,7 +43,10 @@ class TestExclusions:
         path.write_bytes(b"x")
         assert is_excluded(path) is True
 
-    @pytest.mark.parametrize("name", ["DSC_4590.NEF", "DSC_4590.JPG", "DSC_4659.MOV"])
+    @pytest.mark.parametrize(
+        "name",
+        ["DSC_4590.NEF", "DSC_4590.JPG", "DSC_4659.MOV", "IMG_0001.CR2", "IMG_0487.CR3", "DSC00001.ARW"],
+    )
     def test_取り込み対象は除外されない(self, tmp_path, name):
         path = tmp_path / name
         path.write_bytes(b"x")
@@ -113,6 +116,15 @@ class TestScanCard:
         shots = scan_card(make_card(tmp_path))
         pair = [s for s in shots if s.source_name.startswith("DSC_4590")][0]
         assert pair.source_name == "DSC_4590.NEF"
+
+    def test_他社RAWとJPEGのペアも代表ファイルはRAWになる(self, tmp_path):
+        dcim = tmp_path / "DCIM" / "100CANON"
+        dcim.mkdir(parents=True)
+        for name in ["IMG_0001.CR3", "IMG_0001.JPG"]:
+            (dcim / name).write_bytes(b"x" * 16)
+        shots = scan_card(tmp_path)
+        assert len(shots) == 1
+        assert shots[0].source_name == "IMG_0001.CR3"
 
     def test_DCIMが無ければ空になる(self, tmp_path):
         (tmp_path / "NIKON").mkdir()

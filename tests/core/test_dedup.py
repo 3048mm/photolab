@@ -6,8 +6,10 @@
 
 from datetime import datetime
 
+import pytest
+
 from photolab.core.dedup import build_key, fallback_key, still_key
-from photolab.core.metadata import Metadata
+from photolab.core.metadata import Metadata, read_metadata
 
 
 class TestStillKey:
@@ -87,3 +89,18 @@ class TestBuildKey:
     def test_名前キーは他のキーと前置詞で区別される(self):
         key = build_key(Metadata(), "IMG_1234.HEIC", 4096)
         assert key.value.startswith("n:")
+
+
+@pytest.mark.fixtures
+class TestOtherMakerRaw:
+    """Canon / Sony の RAW はショットカウントが取れないので退避キーになる。
+
+    計画書 other_raw_plan.md §4 Q1 で決めた扱い。GUI には弱いキーの警告が出る。
+    """
+
+    @pytest.mark.parametrize("name", ["IMG_0001.CR2", "IMG_0487.CR3", "RAW_SONY_NEX7.ARW"])
+    def test_退避キーになる(self, fixtures, name):
+        path = fixtures / name
+        key = build_key(read_metadata(path), name, path.stat().st_size)
+        assert key.is_fallback
+        assert key.value.startswith("t:")

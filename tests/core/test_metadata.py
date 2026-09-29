@@ -49,6 +49,37 @@ class TestReadJpeg:
 
 
 @pytest.mark.fixtures
+class TestReadOtherRaw:
+    """Canon / Sony の RAW。機種と撮影日時だけを取る。
+
+    ショットカウントは取れないので、重複判定は退避キーに落ちる
+    （計画書 other_raw_plan.md §4 Q1）。期待値は pyexiv2 で確認した。
+    """
+
+    @pytest.mark.parametrize(
+        ("name", "model", "captured_at"),
+        [
+            # CR2 / ARW は TIFF ベース
+            ("IMG_0001.CR2", "Canon EOS 40D", datetime(2008, 3, 4, 17, 10, 51)),
+            ("RAW_CANON_5D_ARGB.CR2", "Canon EOS 5D", datetime(2006, 1, 15, 19, 4, 48)),
+            ("RAW_SONY_ILCA-77M2.ARW", "ILCA-77M2", datetime(2014, 10, 28, 16, 32, 41)),
+            ("RAW_SONY_NEX7.ARW", "NEX-7", datetime(2012, 10, 21, 14, 55, 41)),
+            # CR3 は ISOBMFF。moov/uuid の CMT1 / CMT2 に TIFF が入っている
+            ("IMG_0487.CR3", "Canon EOS R10", datetime(2022, 2, 10, 22, 55, 52)),
+        ],
+    )
+    def test_機種と撮影日時を取得できる(self, fixtures, name, model, captured_at):
+        meta = read_metadata(fixtures / name)
+        assert meta.camera_model == model
+        assert meta.captured_at == captured_at
+
+    def test_ショットカウントは持たない(self, fixtures):
+        meta = read_metadata(fixtures / "IMG_0001.CR2")
+        assert meta.shutter_count is None
+        assert not meta.has_still_key
+
+
+@pytest.mark.fixtures
 class TestReadVideo:
     """MOV の撮影日時はファイル更新日時を使う。
 

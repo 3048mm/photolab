@@ -113,6 +113,13 @@ class TestJpegOnly:
         (tmp_path / "b.JPG").write_bytes(b"")
         assert jpeg_only_names(tmp_path) == ["b.JPG"]
 
+    @pytest.mark.parametrize("raw", ["a.CR2", "a.CR3", "a.ARW"])
+    def test_他社RAWのペアのJPEGも含めない(self, tmp_path, raw):
+        (tmp_path / raw).write_bytes(b"")
+        (tmp_path / "a.JPG").write_bytes(b"")
+        assert jpeg_only_names(tmp_path) == []
+        assert folder_has_raw(tmp_path) is True
+
     def test_動画は対象外(self, tmp_path):
         (tmp_path / "c.MOV").write_bytes(b"")
         assert jpeg_only_names(tmp_path) == []
